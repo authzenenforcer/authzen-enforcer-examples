@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so that a change in a Keycloak or authzen-enforcer release shows up even when no pull
+  # request is open
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pdp:
+    name: PDP decisions (Keycloak)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate the client secret
+        run: |
+          secret=$(openssl rand -hex 24)
+          echo "::add-mask::$secret"
+          echo "DOCUMENT_PORTAL_CLIENT_SECRET=$secret" >> "$GITHUB_ENV"
+      - name: Start Keycloak
+        run: docker compose up --wait
+      - name: Check the decisions
+        run: keycloak/check-decisions.sh
+      - name: Keycloak logs
+        if: failure()
+        run: docker compose logs keycloak
+      - name: Stop Keycloak
+        if: always()
+        run: docker compose down
