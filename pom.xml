@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Builds all examples at once. Each example is a standalone project and does not inherit from
+  this file; build one on its own with "mvn -f <example> ...".
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.authzenenforcer.examples</groupId>
+    <artifactId>authzen-enforcer-examples</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>plain-java</module>
+    </modules>
+
+    <properties>
+        <!-- Code analysis. The examples do not inherit from this pom, so the scanner is called by its
+             full name:
+             mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:${sonar-maven-plugin.version}:sonar
+             (server and token come from SONAR_HOST_URL / SONAR_TOKEN) -->
+        <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+        <sonar.projectKey>authzenenforcer_authzen-enforcer-examples</sonar.projectKey>
+        <sonar.projectName>authzen-enforcer-examples</sonar.projectName>
+        <!-- The examples have no unit tests; CI runs them against the PDP instead -->
+        <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
+    </properties>
+</project>

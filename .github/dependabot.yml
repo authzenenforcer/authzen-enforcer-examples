@@ -1,5 +1,18 @@
 version: 2
 updates:
+  - package-ecosystem: maven
+    # The root pom lists every example as a module
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      maven:
+        patterns: ["*"]
+  # The Keycloak image in compose.yaml; CI checks the realm's decisions with every new version
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

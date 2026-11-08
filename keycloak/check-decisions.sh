@@ -3,18 +3,26 @@
 #
 #   DOCUMENT_PORTAL_CLIENT_SECRET=... keycloak/check-decisions.sh
 #
-# KEYCLOAK_URL defaults to http://127.0.0.1:${KEYCLOAK_PORT:-8080}. Requires curl and jq.
-# Exits with 1 if any decision differs from the expected one.
+# Settings, all optional:
+#   PDP_URL    the realm, default http://127.0.0.1:${KEYCLOAK_PORT:-8080}/realms/authzen-examples
+#   TOKEN_URL  default $PDP_URL/protocol/openid-connect/token
+#   CLIENT_ID  default document-portal
+#
+# Requires curl and jq. Exits with 1 if any decision differs from the expected one.
 set -eu
 
 : "${DOCUMENT_PORTAL_CLIENT_SECRET:?set DOCUMENT_PORTAL_CLIENT_SECRET}"
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://127.0.0.1:${KEYCLOAK_PORT:-8080}}"
-REALM_URL="$KEYCLOAK_URL/realms/authzen-examples"
+PDP_URL="${PDP_URL:-http://127.0.0.1:${KEYCLOAK_PORT:-8080}/realms/authzen-examples}"
+TOKEN_URL="${TOKEN_URL:-$PDP_URL/protocol/openid-connect/token}"
+CLIENT_ID="${CLIENT_ID:-document-portal}"
 
-TOKEN=$(curl -fsS "$REALM_URL/protocol/openid-connect/token" \
-    -d grant_type=client_credentials -d client_id=document-portal \
+TOKEN=$(curl -fsS "$TOKEN_URL" \
+    -d grant_type=client_credentials --data-urlencode "client_id=$CLIENT_ID" \
     --data-urlencode "client_secret=$DOCUMENT_PORTAL_CLIENT_SECRET" | jq -r .access_token)
-ENDPOINT=$(curl -fsS "$KEYCLOAK_URL/.well-known/authzen-configuration/realms/authzen-examples" \
+# The metadata location of the AuthZEN specification: the well-known path goes between the host
+# and the path of the PDP URL
+origin=$(printf '%s' "$PDP_URL" | sed -E 's#^([a-z]+://[^/]+).*#\1#')
+ENDPOINT=$(curl -fsS "$origin/.well-known/authzen-configuration${PDP_URL#"$origin"}" \
     | jq -r .access_evaluation_endpoint)
 
 failures=0
@@ -76,8 +84,8 @@ check true  user bob   collection document create
 check false user erin  collection document list
 
 # The PEP itself as the subject: its service account has the viewer role.
-check true  client document-portal document handbook read
-check false client document-portal document handbook update
+check true  client "$CLIENT_ID" document handbook read
+check false client "$CLIENT_ID" document handbook update
 
 # Unknown subjects, resources and actions are denied, and so is a wrong resource type.
 check false user mallory document handbook read

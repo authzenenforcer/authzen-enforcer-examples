@@ -4,7 +4,10 @@
 #   docker compose up --wait
 #
 # The realm file contains no secrets; Keycloak reads the client secret from the environment when it
-# imports the realm. KEYCLOAK_PORT changes the published port (default 8080).
+# imports the realm.
+#
+# KEYCLOAK_ADDRESS and KEYCLOAK_PORT set where Keycloak is published (default 127.0.0.1:8080). The
+# image stays a literal so that Dependabot can update it.
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.1
@@ -12,7 +15,7 @@ services:
     environment:
       DOCUMENT_PORTAL_CLIENT_SECRET: ${DOCUMENT_PORTAL_CLIENT_SECRET:?set DOCUMENT_PORTAL_CLIENT_SECRET}
     ports:
-      - "127.0.0.1:${KEYCLOAK_PORT:-8080}:8080"
+      - "${KEYCLOAK_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8080}:8080"
     volumes:
       - ./keycloak/authzen-examples-realm.json:/opt/keycloak/data/import/authzen-examples-realm.json:ro
     healthcheck:

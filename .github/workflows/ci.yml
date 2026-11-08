@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Weekly, so that a change in a Keycloak or authzen-enforcer release shows up even when no pull
+  # Weekly, so that a JDK or runner image update that breaks the examples shows up even when no pull
   # request is open
   schedule:
     - cron: '0 6 * * 1'
@@ -28,6 +28,38 @@ jobs:
         run: docker compose up --wait
       - name: Check the decisions
         run: keycloak/check-decisions.sh
+      - name: Keycloak logs
+        if: failure()
+        run: docker compose logs keycloak
+      - name: Stop Keycloak
+        if: always()
+        run: docker compose down
+
+  examples:
+    name: Examples (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [17, 21, 25]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: Generate the client secret
+        run: |
+          secret=$(openssl rand -hex 24)
+          echo "::add-mask::$secret"
+          echo "DOCUMENT_PORTAL_CLIENT_SECRET=$secret" >> "$GITHUB_ENV"
+      - name: Start Keycloak
+        run: docker compose up --wait
+      - name: Build
+        run: mvn -B -ntp verify
+      - name: Run plain-java
+        run: mvn -B -ntp -q -f plain-java exec:java
       - name: Keycloak logs
         if: failure()
         run: docker compose logs keycloak
