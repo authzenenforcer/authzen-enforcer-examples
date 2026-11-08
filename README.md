@@ -19,7 +19,7 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 
 | Example | Shows | Status |
 |---|---|---|
-| `plain-java` | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Planned |
+| [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
 | `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
 | `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
@@ -51,6 +51,17 @@ keycloak/check-decisions.sh
 ```
 
 `docker compose down` stops Keycloak.
+
+## Running an example
+
+With the PDP running and `DOCUMENT_PORTAL_CLIENT_SECRET` set in the same shell:
+
+```bash
+mvn -q -f plain-java compile exec:java
+```
+
+Each example compares the decisions it gets with the ones the realm should make and exits with
+status 1 if any differ. `mvn verify` in the repository root builds all examples.
 
 ## The scenario
 
@@ -97,8 +108,9 @@ them with `"decision": false`, not with an error.
 
 ## Keycloak as an AuthZEN PDP
 
-AuthZEN support in Keycloak is experimental (`--features=authzen`, since 26.7). The behaviour below
-was checked with Keycloak 26.8.1 and affects how the examples are written:
+AuthZEN support in Keycloak is experimental (`--features=authzen`, since 26.7). Dependabot proposes
+new Keycloak versions for `compose.yaml`, and CI runs the decision check and the examples against
+them. The behaviour below was checked with Keycloak 26.8.1 and affects how the examples are written:
 
 - **The endpoints are below `/realms/{realm}/authzen`.** Use metadata discovery, which finds them;
   the default paths of the specification do not apply.
