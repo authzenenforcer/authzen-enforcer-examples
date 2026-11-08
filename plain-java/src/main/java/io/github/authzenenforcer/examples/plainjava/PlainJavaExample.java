@@ -34,6 +34,7 @@ import java.util.Optional;
 public final class PlainJavaExample {
 
     private static final Logger LOG = System.getLogger(PlainJavaExample.class.getName());
+    private static final String CLIENT_SECRET_VARIABLE = "DOCUMENT_PORTAL_CLIENT_SECRET";
 
     private static final Resource HANDBOOK = Resource.of("document", "handbook");
     private static final Resource SALARY_REPORT = Resource.of("document", "salary-report");
@@ -47,21 +48,25 @@ public final class PlainJavaExample {
     }
 
     public static void main(String[] args) {
-        String keycloakUrl = env("KEYCLOAK_URL", "http://127.0.0.1:" + env("KEYCLOAK_PORT", "8080"));
-        String realmUrl = keycloakUrl + "/realms/authzen-examples";
-        String clientSecret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
+        // Set in pom.xml; override them on the command line, for example -Dpdp.url=...
+        String pdpUrl = requiredProperty("pdp.url");
+        String tokenUrl = requiredProperty("token.url");
+        String clientId = requiredProperty("client.id");
+        String unreachablePdpUrl = requiredProperty("unreachable.pdp.url");
+        // The secret comes from the environment, never from the command line, where the shell
+        // history and the process list would show it
+        String clientSecret = System.getenv(CLIENT_SECRET_VARIABLE);
         if (clientSecret == null || clientSecret.isEmpty()) {
-            System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret Keycloak was started with");
+            System.err.println("Set " + CLIENT_SECRET_VARIABLE + " to the secret of the client " + clientId);
             System.exit(2);
         }
 
-        ClientCredentialsTokens tokens = new ClientCredentialsTokens(
-                URI.create(realmUrl + "/protocol/openid-connect/token"), "document-portal", clientSecret);
+        ClientCredentialsTokens tokens = new ClientCredentialsTokens(URI.create(tokenUrl), clientId, clientSecret);
 
         // The PDP URL and the credentials are all the client needs. It finds the endpoints in the
         // metadata the PDP publishes. Create one client per PDP and share it: it is thread-safe.
         AuthZenClient client = AuthZenClient.builder()
-                .pdpUrl(realmUrl)
+                .pdpUrl(pdpUrl)
                 .credentials(tokens)
                 .build();
 
@@ -72,9 +77,9 @@ public final class PlainJavaExample {
         example.context();
         example.collection();
         example.batch();
-        example.clientSubject();
+        example.clientSubject(clientId);
         example.asynchronous();
-        example.failClosed(realmUrl);
+        example.failClosed(pdpUrl, unreachablePdpUrl);
 
         System.out.printf("%nThe provider requested %d token(s) for all of the calls above.%n",
                 tokens.tokenRequests());
@@ -184,10 +189,10 @@ public final class PlainJavaExample {
         report("dave reads at least one", true, any.anyPermitted());
     }
 
-    private void clientSubject() {
+    private void clientSubject(String clientId) {
         section("A client as the subject");
         // Keycloak evaluates a client subject only if it is the calling PEP itself
-        Subject portal = Subject.of("client", "document-portal");
+        Subject portal = Subject.of("client", clientId);
         expect("the portal reads the handbook for its search index", true, portal, "read", HANDBOOK);
         expect("the portal updates the handbook", false, portal, "update", HANDBOOK);
     }
@@ -203,20 +208,20 @@ public final class PlainJavaExample {
         report("carol reads the handbook (evaluateAsync)", true, permitted);
     }
 
-    private void failClosed(String realmUrl) {
+    private void failClosed(String pdpUrl, String unreachablePdpUrl) {
         section("Fail-closed: no decision means deny");
 
         // The PDP rejects the PEP's own credential with 401. That is not a decision about alice.
         AuthZenClient wrongToken = AuthZenClient.builder()
-                .pdpUrl(realmUrl)
+                .pdpUrl(pdpUrl)
                 .credentials(CredentialProvider.staticBearer("not-a-valid-token"))
                 .build();
         expectNoDecision("alice reads the handbook, but the PDP rejects the PEP's token",
                 wrongToken, PdpAuthenticationException.class);
 
-        // Nothing listens on port 9 on most machines; retries are off so that this is quick
+        // An address where no PDP answers; retries are off so that this is quick
         AuthZenClient unreachable = AuthZenClient.builder()
-                .pdpUrl("http://127.0.0.1:9/realms/authzen-examples")
+                .pdpUrl(unreachablePdpUrl)
                 .connectTimeout(Duration.ofSeconds(1))
                 .maxRetries(0)
                 .build();
@@ -299,8 +304,12 @@ public final class PlainJavaExample {
         System.out.printf("%n%s%n", title);
     }
 
-    private static String env(String name, String fallback) {
-        String value = System.getenv(name);
-        return value == null || value.isEmpty() ? fallback : value;
+    private static String requiredProperty(String name) {
+        String value = System.getProperty(name);
+        if (value == null || value.isBlank()) {
+            System.err.println("Set the system property " + name + ", for example with -D" + name + "=...");
+            System.exit(2);
+        }
+        return value;
     }
 }

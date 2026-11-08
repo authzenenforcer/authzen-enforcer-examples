@@ -12,8 +12,70 @@ the same shell:
 mvn -q compile exec:java
 ```
 
+The defaults fit the Keycloak of this repository. To use a PDP elsewhere, such as your own Keycloak
+with the realm imported, override them; see [Configuration](#configuration):
+
+```bash
+mvn -q compile exec:java -Dpdp.url=https://keycloak.example.com/realms/authzen-examples
+```
+
 The program prints every decision it asks for and exits with status 1 if one differs from what the
-realm should decide.
+realm should decide. You get output similar to this; the request IDs differ on every run:
+
+```text
+Metadata discovery
+  PDP:                  http://127.0.0.1:8080/realms/authzen-examples
+  evaluation endpoint:  http://127.0.0.1:8080/realms/authzen-examples/authzen/access/v1/evaluation
+  evaluations endpoint: http://127.0.0.1:8080/realms/authzen-examples/authzen/access/v1/evaluations
+
+Single decisions
+  permit bob reads the handbook
+  deny   erin, who has no role, reads the handbook
+  permit bob updates the handbook
+  deny   bob deletes the handbook
+  permit alice deletes the handbook
+
+Attributes of the resource: resource.properties
+  permit bob updates the release notes while they are a draft
+  deny   bob updates the release notes after they are published
+
+Attributes of the environment: context
+  permit dave (hr) reads the salary report after MFA
+  deny   dave (hr) reads the salary report without MFA
+  deny   alice (admin) reads the salary report after MFA
+
+The document collection
+  permit carol lists the documents
+  deny   carol creates a document
+  permit bob creates a document
+
+Several decisions in one call: Access Evaluations
+  execute_all: which actions does bob see on the handbook?
+  permit bob reads
+  permit bob updates
+  deny   bob deletes
+  deny_on_first_deny: carol exports three documents (2 of 3 answered)
+  deny   carol exports all three
+         the PDP's context for the deny: {reason=deny_on_first_deny}
+  permit_on_first_permit: may dave read any of three documents? (2 of 3 answered)
+  permit dave reads at least one
+
+A client as the subject
+  permit the portal reads the handbook for its search index
+  deny   the portal updates the handbook
+
+Asynchronous calls
+  permit carol reads the handbook (evaluateAsync)
+
+Fail-closed: no decision means deny
+  deny   alice reads the handbook, but the PDP rejects the PEP's token
+         PdpAuthenticationException: PDP rejected the credentials of the PEP with HTTP 401 (X-Request-ID 32770c81-23ff-43ad-83ae-5d640554795e)
+  deny   alice reads the handbook, but the PDP is unreachable
+         PdpCommunicationException: PDP request failed (X-Request-ID f15a574b-a43b-48d2-becc-6566a5c21ff3)
+
+The provider requested 1 token(s) for all of the calls above.
+All decisions are as expected.
+```
 
 ## What it shows
 
@@ -62,8 +124,17 @@ In a framework application, delegate this to the framework's OAuth client instea
 
 ## Configuration
 
-| Variable | Default | Meaning |
+The settings are Maven properties with defaults in [`pom.xml`](pom.xml); `-D` on the command line
+overrides them. The client secret is the exception: it is read from the environment only, because
+the shell history and the process list would show a value given on the command line.
+
+| Setting | Default | Meaning |
 |---|---|---|
-| `DOCUMENT_PORTAL_CLIENT_SECRET` | none, required | The client secret Keycloak was started with |
-| `KEYCLOAK_URL` | `http://127.0.0.1:${KEYCLOAK_PORT}` | Where Keycloak runs |
-| `KEYCLOAK_PORT` | `8080` | Used only when `KEYCLOAK_URL` is not set |
+| `pdp.url` | `http://127.0.0.1:8080/realms/authzen-examples` | The PDP; with Keycloak, the realm |
+| `token.url` | `${pdp.url}/protocol/openid-connect/token` | The token endpoint for the client credentials grant |
+| `client.id` | `document-portal` | The PEP's client |
+| `unreachable.pdp.url` | `http://127.0.0.1:9` | An address where no PDP answers, for the fail-closed step |
+| `DOCUMENT_PORTAL_CLIENT_SECRET` (environment) | none, required | The secret of the PEP's client |
+
+The expected decisions are those of the `authzen-examples` realm, so another PDP needs the same
+scenario.

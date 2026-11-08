@@ -39,7 +39,8 @@ export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
 docker compose up --wait
 ```
 
-Keycloak listens on `http://127.0.0.1:8080`; set `KEYCLOAK_PORT` to use another port. The realm file
+Keycloak listens on `http://127.0.0.1:8080`; `KEYCLOAK_ADDRESS` and `KEYCLOAK_PORT` change the
+address and the port. The realm file
 contains no secrets: Keycloak reads the client secret from the environment when it imports the realm,
 and the examples read it from the same variable. The realm is imported at the first start only;
 `docker compose down` removes the container, and the next start imports the file again.
@@ -49,6 +50,9 @@ To check that the PDP makes the decisions described below:
 ```bash
 keycloak/check-decisions.sh
 ```
+
+The script follows `KEYCLOAK_PORT`; for a PDP elsewhere, set `PDP_URL` (the realm URL), and
+`TOKEN_URL` or `CLIENT_ID` if they differ from Keycloak's defaults.
 
 `docker compose down` stops Keycloak.
 
@@ -61,7 +65,9 @@ mvn -q -f plain-java compile exec:java
 ```
 
 Each example compares the decisions it gets with the ones the realm should make and exits with
-status 1 if any differ. `mvn verify` in the repository root builds all examples.
+status 1 if any differ. The PDP URL and the other settings have defaults that fit this Keycloak;
+`-D` on the command line overrides them, as each example's README describes. `mvn verify` in the
+repository root builds all examples.
 
 ## The scenario
 

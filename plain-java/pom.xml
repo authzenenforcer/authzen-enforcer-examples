@@ -16,6 +16,15 @@
         <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
         <exec-maven-plugin.version>3.6.4</exec-maven-plugin.version>
+
+        <!-- Where the example finds the PDP and the token endpoint. The defaults fit the Keycloak
+             of compose.yaml; override any of them on the command line, such as -Dpdp.url=...
+             The client secret is read from the DOCUMENT_PORTAL_CLIENT_SECRET environment variable. -->
+        <pdp.url>http://127.0.0.1:8080/realms/authzen-examples</pdp.url>
+        <token.url>${pdp.url}/protocol/openid-connect/token</token.url>
+        <client.id>document-portal</client.id>
+        <!-- Used to show the fail-closed behaviour; nothing should answer there -->
+        <unreachable.pdp.url>http://127.0.0.1:9</unreachable.pdp.url>
     </properties>
 
     <dependencyManagement>
@@ -55,6 +64,24 @@
                 <version>${exec-maven-plugin.version}</version>
                 <configuration>
                     <mainClass>io.github.authzenenforcer.examples.plainjava.PlainJavaExample</mainClass>
+                    <systemProperties>
+                        <systemProperty>
+                            <key>pdp.url</key>
+                            <value>${pdp.url}</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>token.url</key>
+                            <value>${token.url}</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>client.id</key>
+                            <value>${client.id}</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>unreachable.pdp.url</key>
+                            <value>${unreachable.pdp.url}</value>
+                        </systemProperty>
+                    </systemProperties>
                 </configuration>
             </plugin>
         </plugins>
