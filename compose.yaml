@@ -10,7 +10,7 @@
 # image stays a literal so that Dependabot can update it.
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1
+    image: quay.io/keycloak/keycloak:26.8.2
     command: ["start-dev", "--features=authzen", "--import-realm", "--health-enabled=true"]
     environment:
       DOCUMENT_PORTAL_CLIENT_SECRET: ${DOCUMENT_PORTAL_CLIENT_SECRET:?set DOCUMENT_PORTAL_CLIENT_SECRET}
