@@ -1,0 +1,345 @@
+{
+  "realm": "authzen-examples",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "admin"
+      },
+      {
+        "name": "editor"
+      },
+      {
+        "name": "viewer"
+      },
+      {
+        "name": "hr"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "admin"
+      ]
+    },
+    {
+      "username": "bob",
+      "email": "bob@example.com",
+      "firstName": "Bob",
+      "lastName": "Editor",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "editor"
+      ]
+    },
+    {
+      "username": "carol",
+      "email": "carol@example.com",
+      "firstName": "Carol",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "viewer"
+      ]
+    },
+    {
+      "username": "dave",
+      "email": "dave@example.com",
+      "firstName": "Dave",
+      "lastName": "HR",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": [
+        "hr"
+      ]
+    },
+    {
+      "username": "erin",
+      "email": "erin@example.com",
+      "firstName": "Erin",
+      "lastName": "Newcomer",
+      "enabled": true,
+      "emailVerified": true
+    },
+    {
+      "username": "service-account-document-portal",
+      "enabled": true,
+      "serviceAccountClientId": "document-portal",
+      "realmRoles": [
+        "viewer"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "document-portal",
+      "name": "Document portal (PEP)",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${DOCUMENT_PORTAL_CLIENT_SECRET}",
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": false,
+        "policyEnforcementMode": "ENFORCING",
+        "decisionStrategy": "UNANIMOUS",
+        "scopes": [
+          {
+            "name": "read"
+          },
+          {
+            "name": "list"
+          },
+          {
+            "name": "create"
+          },
+          {
+            "name": "update"
+          },
+          {
+            "name": "delete"
+          }
+        ],
+        "resources": [
+          {
+            "name": "handbook",
+            "type": "document",
+            "ownerManagedAccess": false,
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "update"
+              },
+              {
+                "name": "delete"
+              }
+            ]
+          },
+          {
+            "name": "release-notes",
+            "type": "document",
+            "ownerManagedAccess": false,
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "update"
+              },
+              {
+                "name": "delete"
+              }
+            ]
+          },
+          {
+            "name": "salary-report",
+            "type": "document",
+            "ownerManagedAccess": false,
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "update"
+              },
+              {
+                "name": "delete"
+              }
+            ]
+          },
+          {
+            "name": "document",
+            "type": "collection",
+            "ownerManagedAccess": false,
+            "scopes": [
+              {
+                "name": "list"
+              },
+              {
+                "name": "create"
+              }
+            ]
+          }
+        ],
+        "policies": [
+          {
+            "name": "admin-policy",
+            "type": "role",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "roles": "[{\"id\":\"admin\",\"required\":false}]"
+            }
+          },
+          {
+            "name": "editor-policy",
+            "type": "role",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "roles": "[{\"id\":\"editor\",\"required\":false}]"
+            }
+          },
+          {
+            "name": "viewer-policy",
+            "type": "role",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "roles": "[{\"id\":\"viewer\",\"required\":false}]"
+            }
+          },
+          {
+            "name": "hr-policy",
+            "type": "role",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "roles": "[{\"id\":\"hr\",\"required\":false}]"
+            }
+          },
+          {
+            "name": "any-role-policy",
+            "type": "aggregate",
+            "logic": "POSITIVE",
+            "decisionStrategy": "AFFIRMATIVE",
+            "config": {
+              "applyPolicies": "[\"admin-policy\",\"editor-policy\",\"viewer-policy\",\"hr-policy\"]"
+            }
+          },
+          {
+            "name": "admin-or-editor-policy",
+            "type": "aggregate",
+            "logic": "POSITIVE",
+            "decisionStrategy": "AFFIRMATIVE",
+            "config": {
+              "applyPolicies": "[\"admin-policy\",\"editor-policy\"]"
+            }
+          },
+          {
+            "name": "draft-status-policy",
+            "description": "resource.properties.status is draft",
+            "type": "regex",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "targetClaim": "status",
+              "pattern": "^draft$",
+              "targetContextAttributes": "true"
+            }
+          },
+          {
+            "name": "mfa-policy",
+            "description": "context.mfa is true",
+            "type": "regex",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "targetClaim": "mfa",
+              "pattern": "^true$",
+              "targetContextAttributes": "true"
+            }
+          },
+          {
+            "name": "read-public-documents-permission",
+            "description": "Every employee reads the handbook and the release notes",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"handbook\",\"release-notes\"]",
+              "scopes": "[\"read\"]",
+              "applyPolicies": "[\"any-role-policy\"]"
+            }
+          },
+          {
+            "name": "update-handbook-permission",
+            "description": "Editors and admins update the handbook",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"handbook\"]",
+              "scopes": "[\"update\"]",
+              "applyPolicies": "[\"admin-or-editor-policy\"]"
+            }
+          },
+          {
+            "name": "update-release-notes-permission",
+            "description": "Editors and admins update the release notes while they are a draft",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"release-notes\"]",
+              "scopes": "[\"update\"]",
+              "applyPolicies": "[\"admin-or-editor-policy\",\"draft-status-policy\"]"
+            }
+          },
+          {
+            "name": "salary-report-permission",
+            "description": "HR reads and updates the salary report after multi-factor authentication",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"salary-report\"]",
+              "scopes": "[\"read\",\"update\"]",
+              "applyPolicies": "[\"hr-policy\",\"mfa-policy\"]"
+            }
+          },
+          {
+            "name": "delete-documents-permission",
+            "description": "Only admins delete documents",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"handbook\",\"release-notes\",\"salary-report\"]",
+              "scopes": "[\"delete\"]",
+              "applyPolicies": "[\"admin-policy\"]"
+            }
+          },
+          {
+            "name": "list-documents-permission",
+            "description": "Every employee lists the documents",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"document\"]",
+              "scopes": "[\"list\"]",
+              "applyPolicies": "[\"any-role-policy\"]"
+            }
+          },
+          {
+            "name": "create-documents-permission",
+            "description": "Editors and admins create documents",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"document\"]",
+              "scopes": "[\"create\"]",
+              "applyPolicies": "[\"admin-or-editor-policy\"]"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
