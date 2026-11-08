@@ -30,6 +30,95 @@ Spring Boot and Quarkus examples will follow when the framework integrations are
 - Java 17 or later
 - Maven 3.9 or later
 - Docker with Docker Compose
+- `curl` and `jq` for the decision check script
+
+## Starting the PDP
+
+```bash
+export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
+docker compose up --wait
+```
+
+Keycloak listens on `http://127.0.0.1:8080`; set `KEYCLOAK_PORT` to use another port. The realm file
+contains no secrets: Keycloak reads the client secret from the environment when it imports the realm,
+and the examples read it from the same variable. The realm is imported at the first start only;
+`docker compose down` removes the container, and the next start imports the file again.
+
+To check that the PDP makes the decisions described below:
+
+```bash
+keycloak/check-decisions.sh
+```
+
+`docker compose down` stops Keycloak.
+
+## The scenario
+
+The examples play the backend of a company's document portal. The backend is the PEP: it asks the
+PDP whether a user may perform an action on a document. The realm `authzen-examples`
+([`keycloak/authzen-examples-realm.json`](keycloak/authzen-examples-realm.json)) contains:
+
+**The PEP.** The confidential client `document-portal`. It obtains its access token with the client
+credentials grant and calls the AuthZEN endpoints with it.
+
+**Users.**
+
+| User | Role |
+|---|---|
+| `alice` | `admin` |
+| `bob` | `editor` |
+| `carol` | `viewer` |
+| `dave` | `hr` |
+| `erin` | no role |
+
+**Resources and permissions.** Documents have the type `document`; the collection of documents is
+`{"type": "collection", "id": "document"}`. Actions follow the authzen-enforcer convention: `read`,
+`list`, `create`, `update` and `delete`.
+
+| Resource | Action | Allowed for |
+|---|---|---|
+| `document:handbook` | `read` | every role |
+| | `update` | `editor`, `admin` |
+| | `delete` | `admin` |
+| `document:release-notes` | `read` | every role |
+| | `update` | `editor`, `admin`, while `resource.properties.status` is `draft` |
+| | `delete` | `admin` |
+| `document:salary-report` | `read`, `update` | `hr`, when `context.mfa` is `true` |
+| | `delete` | `admin` |
+| `collection:document` | `list` | every role |
+| | `create` | `editor`, `admin` |
+
+The service account of `document-portal` has the `viewer` role, so the portal itself, as the subject
+`{"type": "client", "id": "document-portal"}`, can read the handbook and the release notes. This
+stands for work that the portal does on its own behalf, such as building a search index.
+
+Anything not listed is denied. That includes unknown users, resources and actions: Keycloak answers
+them with `"decision": false`, not with an error.
+
+## Keycloak as an AuthZEN PDP
+
+AuthZEN support in Keycloak is experimental (`--features=authzen`, since 26.7). The behaviour below
+was checked with Keycloak 26.8.1 and affects how the examples are written:
+
+- **The endpoints are below `/realms/{realm}/authzen`.** Use metadata discovery, which finds them;
+  the default paths of the specification do not apply.
+- **Only the Access Evaluation and Access Evaluations APIs** are available. There are no Search
+  APIs, so the examples do not use them.
+- **`resource.type` must equal the type of the Keycloak resource**, and `resource.id` is the
+  resource's name. `action.name` is a scope name.
+- **A client subject can only be the calling client.** A request with `subject.type` `client` is
+  evaluated only when `subject.id` is the client ID of the PEP that sends it; any other client is
+  denied.
+- **`resource.properties` and `context` share one set of attributes.** Policies cannot tell which
+  of the two a value came from, and the context wins when both use the same name
+  ([keycloak/keycloak#54848](https://github.com/keycloak/keycloak/issues/54848)). The realm
+  therefore uses different names (`status` for the resource, `mfa` for the context).
+- **`action.properties` and unknown fields are rejected** with `400`
+  ([keycloak/keycloak#54542](https://github.com/keycloak/keycloak/issues/54542)), so the examples do
+  not send them.
+- **`subject.properties` override the user's attributes** in Keycloak
+  ([keycloak/keycloak#53328](https://github.com/keycloak/keycloak/issues/53328)). The realm does not
+  base any decision on subject attributes.
 
 ## License
 
