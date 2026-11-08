@@ -16,4 +16,16 @@
     <modules>
         <module>plain-java</module>
     </modules>
+
+    <properties>
+        <!-- Code analysis. The examples do not inherit from this pom, so the scanner is called by its
+             full name:
+             mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:${sonar-maven-plugin.version}:sonar
+             (server and token come from SONAR_HOST_URL / SONAR_TOKEN) -->
+        <sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+        <sonar.projectKey>authzenenforcer_authzen-enforcer-examples</sonar.projectKey>
+        <sonar.projectName>authzen-enforcer-examples</sonar.projectName>
+        <!-- The examples have no unit tests; CI runs them against the PDP instead -->
+        <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
+    </properties>
 </project>
