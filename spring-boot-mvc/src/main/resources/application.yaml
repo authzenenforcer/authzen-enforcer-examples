@@ -1,0 +1,35 @@
+# The defaults fit the Keycloak of compose.yaml. Override any of them on the command line, such as
+# --authzen.pdp.url=..., or with environment variables, such as AUTHZEN_PDP_URL=...
+server:
+  # Keycloak uses 8080
+  port: 8081
+
+authzen:
+  pdp:
+    # The only setting the starter requires: the PDP's base URL, here the realm. The endpoints come
+    # from the metadata it publishes.
+    url: http://127.0.0.1:8080/realms/authzen-examples
+  enforcer:
+    subject:
+      # The realm's policies name users by their username. The default, sub, is a stable id and is
+      # the better choice where the PDP knows it
+      id-claim: preferred_username
+    resource:
+      # /documents/{id} becomes {"type": "document", ...}, the type of the realm's resources
+      singularize: true
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Callers bring access tokens of the same realm
+          issuer-uri: ${authzen.pdp.url}
+
+example:
+  # The PEP's own credentials: the client credentials grant of the confidential client
+  # document-portal. Its secret comes from DOCUMENT_PORTAL_CLIENT_SECRET.
+  token-url: ${authzen.pdp.url}/protocol/openid-connect/token
+  client-id: document-portal
+  # The public client that the decision check gets user tokens from
+  user-client-id: documents-cli

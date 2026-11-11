@@ -15,6 +15,7 @@
 
     <modules>
         <module>plain-java</module>
+        <module>spring-boot-mvc</module>
     </modules>
 
     <properties>

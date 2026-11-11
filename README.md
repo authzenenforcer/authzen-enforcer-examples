@@ -11,7 +11,7 @@ Java SDK that acts as a **Policy Enforcement Point (PEP)** for the
 ## What is here
 
 Every example is a standalone Maven project. You can copy a single directory and build it on its
-own; it uses only released versions of authzen-enforcer from Maven Central. The `pom.xml` in the
+own; it uses only released versions of authzen-enforcer from Maven Central, except where noted. The `pom.xml` in the
 repository root only builds all examples at once.
 
 All examples talk to the same Policy Decision Point (PDP): a [Keycloak](https://www.keycloak.org/)
@@ -20,10 +20,11 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 | Example | Shows | Status |
 |---|---|---|
 | [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
+| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, context from claims | Needs the unreleased starter |
 | `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
 | `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
-Spring Boot and Quarkus examples will follow when the framework integrations are released.
+A Quarkus example will follow when that integration is released.
 
 ## Requirements
 
@@ -36,13 +37,14 @@ Spring Boot and Quarkus examples will follow when the framework integrations are
 
 ```bash
 export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
+export EXAMPLE_USER_PASSWORD=$(openssl rand -hex 24)
 docker compose up --wait
 ```
 
 Keycloak listens on `http://127.0.0.1:8080`; `KEYCLOAK_ADDRESS` and `KEYCLOAK_PORT` change the
 address and the port. The realm file
-contains no secrets: Keycloak reads the client secret from the environment when it imports the realm,
-and the examples read it from the same variable. The realm is imported at the first start only;
+contains no secrets: Keycloak reads the client secret and the users' password from the environment
+when it imports the realm, and the examples read them from the same variables. The realm is imported at the first start only;
 `docker compose down` removes the container, and the next start imports the file again.
 
 To check that the PDP makes the decisions described below:
@@ -77,6 +79,10 @@ PDP whether a user may perform an action on a document. The realm `authzen-examp
 
 **The PEP.** The confidential client `document-portal`. It obtains its access token with the client
 credentials grant and calls the AuthZEN endpoints with it.
+
+**The users' client.** The public client `documents-cli` signs the users in with the password grant,
+for the `spring-boot-mvc` example's decision check only. All users share the password in
+`EXAMPLE_USER_PASSWORD`.
 
 **Users.**
 

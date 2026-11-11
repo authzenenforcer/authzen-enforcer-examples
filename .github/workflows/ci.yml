@@ -19,11 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Generate the client secret
+      - name: Generate the client secret and the users' password
         run: |
           secret=$(openssl rand -hex 24)
           echo "::add-mask::$secret"
           echo "DOCUMENT_PORTAL_CLIENT_SECRET=$secret" >> "$GITHUB_ENV"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          echo "EXAMPLE_USER_PASSWORD=$password" >> "$GITHUB_ENV"
       - name: Start Keycloak
         run: docker compose up --wait
       - name: Check the decisions
@@ -49,11 +52,14 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
-      - name: Generate the client secret
+      - name: Generate the client secret and the users' password
         run: |
           secret=$(openssl rand -hex 24)
           echo "::add-mask::$secret"
           echo "DOCUMENT_PORTAL_CLIENT_SECRET=$secret" >> "$GITHUB_ENV"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          echo "EXAMPLE_USER_PASSWORD=$password" >> "$GITHUB_ENV"
       - name: Start Keycloak
         run: docker compose up --wait
       - name: Build
