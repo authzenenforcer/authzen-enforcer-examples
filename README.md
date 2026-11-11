@@ -47,6 +47,18 @@ contains no secrets: Keycloak reads the client secret and the users' password fr
 when it imports the realm, and the examples read them from the same variables. The realm is imported at the first start only;
 `docker compose down` removes the container, and the next start imports the file again.
 
+To look at the realm in the admin console, also set an administrator before the first start; it is
+only created then, so a running Keycloak needs `docker compose down` first:
+
+```bash
+export KC_BOOTSTRAP_ADMIN_USERNAME=admin
+export KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 12)
+```
+
+The console is at `http://127.0.0.1:8080/admin` (or the port in `KEYCLOAK_PORT`). The decisions
+come from the authorization settings of the client `document-portal`: realm `authzen-examples` →
+Clients → `document-portal` → Authorization.
+
 To check that the PDP makes the decisions described below:
 
 ```bash

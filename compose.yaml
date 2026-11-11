@@ -16,6 +16,10 @@ services:
     environment:
       DOCUMENT_PORTAL_CLIENT_SECRET: ${DOCUMENT_PORTAL_CLIENT_SECRET:?set DOCUMENT_PORTAL_CLIENT_SECRET}
       EXAMPLE_USER_PASSWORD: ${EXAMPLE_USER_PASSWORD:?set EXAMPLE_USER_PASSWORD}
+      # Optional: an administrator for the admin console, created at the first start only. Without
+      # a value here, Compose passes these on only when they are set where it runs
+      KC_BOOTSTRAP_ADMIN_USERNAME:
+      KC_BOOTSTRAP_ADMIN_PASSWORD:
     ports:
       - "${KEYCLOAK_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8080}:8080"
     volumes:
