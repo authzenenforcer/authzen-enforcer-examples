@@ -52,8 +52,11 @@ public class DocumentsApplication {
                 .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
                 .oauth2ResourceServer(server -> server.jwt(Customizer.withDefaults()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // A stateless API that takes bearer tokens only, which browsers do not send by themselves
-                .csrf(csrf -> csrf.disable())
+                // A browser does not add an Authorization header to a cross-site request by itself, so
+                // requests that carry one need no CSRF token; any other request still does. Requiring one
+                // would deny the bearer-token writes of this API before the PDP is asked
+                // NOSONAR on the next line: java:S4502, safe for the reason above
+                .csrf(csrf -> csrf.ignoringRequestMatchers(request -> request.getHeader("Authorization") != null)) // NOSONAR
                 .build();
     }
 }

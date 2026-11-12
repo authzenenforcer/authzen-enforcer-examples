@@ -28,5 +28,8 @@
         <sonar.projectName>authzen-enforcer-examples</sonar.projectName>
         <!-- The examples have no unit tests; CI runs them against the PDP instead -->
         <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
+        <!-- Each example is standalone, so the examples that obtain the PEP's token carry their own
+             copy of the same class instead of sharing a module -->
+        <sonar.cpd.exclusions>**/ClientCredentialsTokens.java</sonar.cpd.exclusions>
     </properties>
 </project>
