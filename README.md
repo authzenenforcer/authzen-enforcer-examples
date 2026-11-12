@@ -11,7 +11,7 @@ Java SDK that acts as a **Policy Enforcement Point (PEP)** for the
 ## What is here
 
 Every example is a standalone Maven project. You can copy a single directory and build it on its
-own; it uses only released versions of authzen-enforcer from Maven Central, except where noted. The `pom.xml` in the
+own; it uses the latest release of authzen-enforcer from Maven Central. The `pom.xml` in the
 repository root only builds all examples at once.
 
 All examples talk to the same Policy Decision Point (PDP): a [Keycloak](https://www.keycloak.org/)
@@ -20,7 +20,7 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 | Example | Shows | Status |
 |---|---|---|
 | [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
-| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, context from claims | Needs the unreleased starter |
+| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims | Available |
 | `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
 | `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
@@ -76,6 +76,13 @@ With the PDP running and `DOCUMENT_PORTAL_CLIENT_SECRET` set in the same shell:
 
 ```bash
 mvn -q -f plain-java compile exec:java
+```
+
+The `spring-boot-mvc` example is an application that keeps running; its script starts the PDP as
+well and keeps the secrets in `.env`, see [its README](spring-boot-mvc/README.md):
+
+```bash
+spring-boot-mvc/run.sh
 ```
 
 Each example compares the decisions it gets with the ones the realm should make and exits with

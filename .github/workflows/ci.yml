@@ -66,6 +66,8 @@ jobs:
         run: mvn -B -ntp verify
       - name: Run plain-java
         run: mvn -B -ntp -q -f plain-java exec:java
+      - name: Run the decision check of spring-boot-mvc
+        run: spring-boot-mvc/run.sh check
       - name: Keycloak logs
         if: failure()
         run: docker compose logs keycloak

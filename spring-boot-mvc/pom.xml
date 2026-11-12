@@ -12,7 +12,7 @@
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <authzen-enforcer.version>0.2.0-SNAPSHOT</authzen-enforcer.version>
+        <authzen-enforcer.version>0.2.0</authzen-enforcer.version>
         <spring-boot.version>4.0.9</spring-boot.version>
         <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>

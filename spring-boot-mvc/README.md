@@ -8,10 +8,9 @@ Spring Boot offers two web stacks: Spring MVC on servlets, used here, and the re
 WebFlux. The starter supports Spring MVC for now; a WebFlux example follows once it supports that
 too.
 
-> **Not released yet.** The starter is in development and not on Maven Central. Until it is, build
-> it from the main repository first (`mvn install -DskipTests` in a clone of
-> [authzen-enforcer](https://github.com/authzenenforcer/authzen-enforcer)); this example uses
-> `0.2.0-SNAPSHOT`.
+> The starter is a preview, available since authzen-enforcer 0.2.0. It supports Spring MVC;
+> WebFlux, an adapter for Spring Security's OAuth 2.0 client and the auto-configuration of metrics
+> follow.
 
 ## What it shows
 
@@ -33,62 +32,56 @@ too.
 
 ## Running it
 
-Run these steps **in one shell, in the repository root** (not in `spring-boot-mvc/`). They start a fresh
-Keycloak with new secrets, so the realm and the application always use the same values. If port
-`8080` is taken on your machine, uncomment the `KEYCLOAK_PORT` line.
+From the repository root:
 
 ```bash
-# 1. Secrets for the realm; the application reads the same variables
-export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
-export EXAMPLE_USER_PASSWORD=$(openssl rand -hex 24)
-# export KEYCLOAK_PORT=8180
-KEYCLOAK=http://127.0.0.1:${KEYCLOAK_PORT:-8080}
-
-# 2. A fresh Keycloak, which imports the realm with these secrets
-docker compose down
-docker compose up --wait
-
-# 3. Build and start the application on port 8081, in the background, logging to app.log
-mvn -q -f spring-boot-mvc package
-java -jar spring-boot-mvc/target/spring-boot-mvc-1.0-SNAPSHOT.jar \
-  --authzen.pdp.url=$KEYCLOAK/realms/authzen-examples > app.log 2>&1 &
-until curl -s -o /dev/null http://127.0.0.1:8081/documents
-do
-  sleep 1
-done
-
-# 4. A token for bob from Keycloak, and calls to the application with it
-TOKEN=$(curl -s $KEYCLOAK/realms/authzen-examples/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=documents-cli -d username=bob \
-  --data-urlencode "password=$EXAMPLE_USER_PASSWORD" | jq -r .access_token)
-
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8081/documents/handbook             # 200
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8081/documents/handbook/download    # 200
-curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8081/documents/handbook   # 403
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/documents/handbook                                                # 401
-
-# 5. Stop the application and Keycloak
-kill %1
-docker compose down
+spring-boot-mvc/run.sh         # start Keycloak and the application, and show a few calls
+spring-boot-mvc/run.sh stop    # stop both
 ```
 
-Keycloak issues the tokens and makes the decisions (`8080`, or `KEYCLOAK_PORT`); the application
-serves the documents API on `8081`. The other users are `alice` (admin), `carol` (viewer), `dave`
-(hr) and `erin` (no role); see the [main README](../README.md#the-scenario).
+[`run.sh`](run.sh) starts the Keycloak of this repository, builds the application, starts it in
+the background on port `8081` and calls it as a few users:
+
+```text
+Calls to the application, http://127.0.0.1:8081:
+  200 bob reads the handbook
+  403 bob deletes the handbook (only admins may)
+  401 a caller without a token reads the handbook
+```
+
+Both keep running until `run.sh stop`, so that you can make your own calls; the script prints how.
+The log of the application is in `app.log`.
+
+The secrets of the realm, the client secret of the PEP and the users' password, are in `.env` in
+the repository root. The first run creates it with random values; Git ignores it, and Docker
+Compose, the application and the script read it, so they always agree. For your own calls, load it
+into your shell:
+
+```bash
+set -a; . ./.env; set +a
+TOKEN=$(curl -s http://127.0.0.1:$KEYCLOAK_PORT/realms/authzen-examples/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=documents-cli -d username=carol \
+  --data-urlencode "password=$EXAMPLE_USER_PASSWORD" | jq -r .access_token)
+curl -i -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8081/documents
+```
+
+Keycloak issues the tokens and makes the decisions; the application serves the documents API. The
+users are `alice` (admin), `bob` (editor), `carol` (viewer), `dave` (hr) and `erin` (no role); see
+the [main README](../README.md#the-scenario).
+
+| Setting | |
+|---|---|
+| `KEYCLOAK_PORT=8180 spring-boot-mvc/run.sh` | Keycloak on another port than `8080`, for example when it is taken; kept in `.env` |
+| `DEBUG=1 spring-boot-mvc/run.sh` | the application with a debugger port on `127.0.0.1:5005`, for your IDE's remote debugging |
 
 `documents-cli` is a public client with the password grant, which the realm has for this example
 only. A real client signs users in with the authorization code flow.
 
 ### The decision check
 
-With `--example.check=true`, the application calls its own endpoints as the users of the realm once
-it has started, prints every status and exits with status 1 if one differs from the expected one.
-After steps 1 and 2 above, in the same shell:
-
-```bash
-java -jar spring-boot-mvc/target/spring-boot-mvc-1.0-SNAPSHOT.jar \
-  --authzen.pdp.url=$KEYCLOAK/realms/authzen-examples --example.check=true
-```
+`spring-boot-mvc/run.sh check` runs the application with `--example.check=true`: it calls its own
+endpoints as the users of the realm, prints every status and exits with status 1 if one differs
+from the expected one. CI runs it.
 
 ```text
 A document
