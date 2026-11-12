@@ -13,3 +13,6 @@ target/
 
 ### jenv ###
 .java-version
+### Secrets and logs of the spring-boot-mvc example (spring-boot-mvc/run.sh) ###
+.env
+app.log

@@ -27,6 +27,13 @@
       "emailVerified": true,
       "realmRoles": [
         "admin"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${EXAMPLE_USER_PASSWORD}",
+          "temporary": false
+        }
       ]
     },
     {
@@ -38,6 +45,13 @@
       "emailVerified": true,
       "realmRoles": [
         "editor"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${EXAMPLE_USER_PASSWORD}",
+          "temporary": false
+        }
       ]
     },
     {
@@ -49,6 +63,13 @@
       "emailVerified": true,
       "realmRoles": [
         "viewer"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${EXAMPLE_USER_PASSWORD}",
+          "temporary": false
+        }
       ]
     },
     {
@@ -60,6 +81,13 @@
       "emailVerified": true,
       "realmRoles": [
         "hr"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${EXAMPLE_USER_PASSWORD}",
+          "temporary": false
+        }
       ]
     },
     {
@@ -68,7 +96,14 @@
       "firstName": "Erin",
       "lastName": "Newcomer",
       "enabled": true,
-      "emailVerified": true
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${EXAMPLE_USER_PASSWORD}",
+          "temporary": false
+        }
+      ]
     },
     {
       "username": "service-account-document-portal",
@@ -340,6 +375,16 @@
           }
         ]
       }
+    },
+    {
+      "clientId": "documents-cli",
+      "name": "Users of the spring-boot-mvc example's decision check",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false
     }
   ]
 }

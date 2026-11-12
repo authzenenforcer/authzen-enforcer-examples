@@ -1,10 +1,11 @@
 # Keycloak as the AuthZEN Policy Decision Point (PDP) for all examples.
 #
 #   export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
+#   export EXAMPLE_USER_PASSWORD=$(openssl rand -hex 24)
 #   docker compose up --wait
 #
-# The realm file contains no secrets; Keycloak reads the client secret from the environment when it
-# imports the realm.
+# The realm file contains no secrets; Keycloak reads the client secret and the users' password from
+# the environment when it imports the realm.
 #
 # KEYCLOAK_ADDRESS and KEYCLOAK_PORT set where Keycloak is published (default 127.0.0.1:8080). The
 # image stays a literal so that Dependabot can update it.
@@ -14,6 +15,11 @@ services:
     command: ["start-dev", "--features=authzen", "--import-realm", "--health-enabled=true"]
     environment:
       DOCUMENT_PORTAL_CLIENT_SECRET: ${DOCUMENT_PORTAL_CLIENT_SECRET:?set DOCUMENT_PORTAL_CLIENT_SECRET}
+      EXAMPLE_USER_PASSWORD: ${EXAMPLE_USER_PASSWORD:?set EXAMPLE_USER_PASSWORD}
+      # Optional: an administrator for the admin console, created at the first start only. Without
+      # a value here, Compose passes these on only when they are set where it runs
+      KC_BOOTSTRAP_ADMIN_USERNAME:
+      KC_BOOTSTRAP_ADMIN_PASSWORD:
     ports:
       - "${KEYCLOAK_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8080}:8080"
     volumes:
