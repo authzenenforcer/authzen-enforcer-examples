@@ -20,7 +20,7 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 | Example | Shows | Status |
 |---|---|---|
 | [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
-| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims | Available |
+| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims, a batch with `deny_on_first_deny` | Available |
 | `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
 | `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
