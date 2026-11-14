@@ -12,14 +12,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The documents of the portal, kept in memory.
+ * The documents API, one document at a time.
  *
  * <p>No handler names an action or a resource: the starter infers them from the HTTP method and the
  * route. {@code GET /documents/handbook} asks whether the caller may {@code read}
@@ -32,22 +29,21 @@ import java.util.concurrent.ConcurrentHashMap;
 @CheckPermission
 public class DocumentController {
 
-    private final Map<String, String> documents = new ConcurrentHashMap<>(Map.of(
-            "handbook", "How we work",
-            "release-notes", "What changed",
-            "salary-report", "Who earns what"));
+    private final Documents documents;
+
+    DocumentController(Documents documents) {
+        this.documents = documents;
+    }
 
     @GetMapping
     public List<String> list() {
-        return documents.keySet().stream().sorted().toList();
+        return documents.ids();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public String create(@RequestBody String content) {
-        String id = "document-" + (documents.size() + 1);
-        documents.put(id, content);
-        return id;
+        return documents.create(content);
     }
 
     /**
@@ -61,7 +57,7 @@ public class DocumentController {
     @CheckPermission(context = "mfa=#claims?.['acr'] == 'mfa'")
     @GetMapping("/{id}")
     public String read(@PathVariable String id) {
-        return document(id);
+        return documents.get(id);
     }
 
     /**
@@ -75,27 +71,17 @@ public class DocumentController {
     @CheckPermission(action = "read", resourceType = "document", resourceId = "#id")
     @GetMapping("/{id}/download")
     public String download(@PathVariable String id) {
-        return document(id);
+        return documents.get(id);
     }
 
     @PutMapping("/{id}")
     public void update(@PathVariable String id, @RequestBody String content) {
-        document(id);
-        documents.put(id, content);
+        documents.update(id, content);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String id) {
-        document(id);
-        documents.remove(id);
-    }
-
-    private String document(String id) {
-        String content = documents.get(id);
-        if (content == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
-        }
-        return content;
+        documents.delete(id);
     }
 }

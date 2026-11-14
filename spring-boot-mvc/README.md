@@ -26,6 +26,13 @@ too.
 - **Context from claims.** Reading a document sends `context.mfa`, derived from the `acr` claim
   with an expression. Expressions can read path variables, a few values of the request and the
   caller's claims, never the caller's token.
+- **A batch with `deny_on_first_deny`.**
+  [`BulkDeleteController`](src/main/java/io/github/authzenenforcer/examples/springbootmvc/BulkDeleteController.java)
+  deletes several documents at once, all or none. `@CheckPermission` asks about one resource, so
+  the handler asks the PDP itself, with the starter's `AuthZenClient` and `SubjectResolver`: one
+  Access Evaluations request with a `delete` for every document and
+  `options.evaluations_semantic` set to `deny_on_first_deny`, so the PDP stops at the first
+  document the caller may not delete. A decision it did not return counts as a deny.
 - **The PEP's own identity.** The application authenticates to the PDP as the confidential client
   `document-portal`, with the client credentials grant. It never forwards the caller's token.
 - **Answers.** No token: `401` with Spring Security's challenge. A deny or a PDP failure: `403`.
@@ -99,6 +106,11 @@ The document collection
   403 carol creates a document
   201 bob creates a document
   204 alice deletes the handbook
+
+Several documents at once
+  403 bob deletes the release notes and the salary report
+  403 alice deletes the release notes and bob's new document
+  204 alice deletes the release notes and the salary report
 
 All statuses are as expected.
 ```

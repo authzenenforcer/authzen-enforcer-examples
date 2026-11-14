@@ -15,6 +15,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -78,6 +79,15 @@ class DecisionCheck implements ApplicationRunner {
         unexpected += expect(api, "alice deletes the handbook", 204, "alice", HttpMethod.DELETE, "/documents/handbook",
                 password);
         System.out.println();
+        System.out.println("Several documents at once");
+        unexpected += expectBulkDelete(api, "bob deletes the release notes and the salary report", 403, "bob",
+                List.of("release-notes", "salary-report"), password);
+        // bob's document-4 is unknown to the realm, so it is denied, and the release notes stay
+        unexpected += expectBulkDelete(api, "alice deletes the release notes and bob's new document", 403, "alice",
+                List.of("release-notes", "document-4"), password);
+        unexpected += expectBulkDelete(api, "alice deletes the release notes and the salary report", 204, "alice",
+                List.of("release-notes", "salary-report"), password);
+        System.out.println();
         if (unexpected > 0) {
             System.out.printf("%d status(es) differ from the expected ones.%n", unexpected);
             exit(1);
@@ -90,11 +100,24 @@ class DecisionCheck implements ApplicationRunner {
     private int expect(RestClient api, String description, int expected, String user, HttpMethod method, String path,
             String password) {
         RestClient.RequestBodySpec request = api.method(method).uri(path);
-        if (user != null) {
-            request.header("Authorization", "Bearer " + token(user, password));
-        }
         if (method == HttpMethod.POST || method == HttpMethod.PUT) {
             request.contentType(MediaType.TEXT_PLAIN).body("Written by " + user);
+        }
+        return expect(request, description, expected, user, password);
+    }
+
+    private int expectBulkDelete(RestClient api, String description, int expected, String user, List<String> ids,
+            String password) {
+        RestClient.RequestBodySpec request = api.post().uri("/documents/bulk-delete")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ids);
+        return expect(request, description, expected, user, password);
+    }
+
+    private int expect(RestClient.RequestBodySpec request, String description, int expected, String user,
+            String password) {
+        if (user != null) {
+            request.header("Authorization", "Bearer " + token(user, password));
         }
         int status = request.exchange((sent, response) -> response.getStatusCode().value());
         String mark = status == expected ? "" : "   <-- expected " + expected;
