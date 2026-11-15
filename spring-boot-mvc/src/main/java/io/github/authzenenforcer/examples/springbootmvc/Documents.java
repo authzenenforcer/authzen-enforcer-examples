@@ -22,7 +22,7 @@ class Documents {
             "release-notes", "What changed",
             "salary-report", "Who earns what"));
 
-    /** The number of the last created document; never reused, so a new document replaces none. */
+    /** The number of the last created document; never reused, and a new document replaces none. */
     private final AtomicInteger created = new AtomicInteger(documents.size());
 
     List<String> ids() {
@@ -30,8 +30,10 @@ class Documents {
     }
 
     String create(String content) {
-        String id = "document-" + created.incrementAndGet();
-        documents.put(id, content);
+        String id;
+        do {
+            id = "document-" + created.incrementAndGet();
+        } while (documents.putIfAbsent(id, content) != null);
         return id;
     }
 
@@ -39,24 +41,31 @@ class Documents {
     String get(String id) {
         String content = documents.get(id);
         if (content == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+            throw notFound();
         }
         return content;
     }
 
+    /** Replaces a document in one step, so that it cannot bring back one deleted meanwhile. */
     void update(String id, String content) {
-        get(id);
-        documents.put(id, content);
+        if (documents.computeIfPresent(id, (key, old) -> content) == null) {
+            throw notFound();
+        }
     }
 
     void delete(String id) {
-        get(id);
-        documents.remove(id);
+        if (documents.remove(id) == null) {
+            throw notFound();
+        }
     }
 
     /** Deletes all documents, or none and answers with {@code 404} if one of them does not exist. */
     void deleteAll(Collection<String> ids) {
         ids.forEach(this::get);
         ids.forEach(documents::remove);
+    }
+
+    private static ResponseStatusException notFound() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND);
     }
 }
