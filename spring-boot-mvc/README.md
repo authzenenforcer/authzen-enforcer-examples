@@ -33,6 +33,14 @@ too.
   Access Evaluations request with a `delete` for every document and
   `options.evaluations_semantic` set to `deny_on_first_deny`, so the PDP stops at the first
   document the caller may not delete. A decision it did not return counts as a deny.
+- **Filtering a list.** The `list` decision on `GET /documents` is about the collection, not about
+  the documents in it: it lets the handler run, and the handler decides what it returns. So
+  `DocumentController` asks the PDP about every document in one Access Evaluations request, with
+  the same `read`, subject and context as reading one, and returns only the permitted ones. A
+  decision per document needs a PDP that can decide about each of them; this realm knows only the
+  documents it was created with, so a document created later is never listed. With pagination,
+  filter before paging, or the pages come back short and the totals count documents the caller
+  cannot see.
 - **The PEP's own identity.** The application authenticates to the PDP as the confidential client
   `document-portal`, with the client credentials grant. It never forwards the caller's token.
 - **Answers.** No token: `401` with Spring Security's challenge. A deny or a PDP failure: `403`.
@@ -102,9 +110,11 @@ A document
   403 dave (hr) reads the salary report without MFA
 
 The document collection
-  200 carol lists the documents
+  200 carol lists the documents: [handbook, release-notes]
+  403 erin, who has no role, lists the documents
   403 carol creates a document
   201 bob creates a document
+  200 bob lists the documents, without his new one: [handbook, release-notes]
   204 alice deletes the handbook
 
 Several documents at once
