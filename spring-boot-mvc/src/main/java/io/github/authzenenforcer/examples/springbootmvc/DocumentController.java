@@ -59,7 +59,8 @@ public class DocumentController {
      * documents in it, so the handler filters them itself. One Access Evaluations request asks for a
      * {@code read} of every document, with the same subject and context as {@link #read(String)},
      * so that the list shows exactly the documents the caller could open. The default semantic,
-     * {@code execute_all}, returns a decision for each; one the PDP did not return counts as a deny.
+     * {@code execute_all}, returns a decision for each; the client rejects an answer that lacks one,
+     * and that fails the request like any other failure of the PDP.
      *
      * <p>A decision per document needs a PDP that can decide about each of them. This realm knows
      * only the documents it was created with, so a document created later, such as bob's

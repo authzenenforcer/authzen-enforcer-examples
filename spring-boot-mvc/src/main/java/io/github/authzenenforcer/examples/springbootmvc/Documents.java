@@ -8,6 +8,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The documents of the portal, kept in memory and shared by {@link DocumentController} and
@@ -21,12 +22,15 @@ class Documents {
             "release-notes", "What changed",
             "salary-report", "Who earns what"));
 
+    /** The number of the last created document; never reused, so a new document replaces none. */
+    private final AtomicInteger created = new AtomicInteger(documents.size());
+
     List<String> ids() {
         return documents.keySet().stream().sorted().toList();
     }
 
     String create(String content) {
-        String id = "document-" + (documents.size() + 1);
+        String id = "document-" + created.incrementAndGet();
         documents.put(id, content);
         return id;
     }
