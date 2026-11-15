@@ -73,9 +73,16 @@ class DecisionCheck implements ApplicationRunner {
                 "/documents/salary-report", password);
         System.out.println();
         System.out.println("The document collection");
-        unexpected += expect(api, "carol lists the documents", 200, "carol", HttpMethod.GET, "/documents", password);
+        // Nobody may read the salary report without MFA, so it is not listed
+        unexpected += expectList(api, "carol lists the documents", "carol", List.of("handbook", "release-notes"),
+                password);
+        unexpected += expect(api, "erin, who has no role, lists the documents", 403, "erin", HttpMethod.GET,
+                "/documents", password);
         unexpected += expect(api, "carol creates a document", 403, "carol", HttpMethod.POST, "/documents", password);
         unexpected += expect(api, "bob creates a document", 201, "bob", HttpMethod.POST, "/documents", password);
+        // bob's document-4 is unknown to the realm, so the PDP never permits reading it
+        unexpected += expectList(api, "bob lists the documents, without his new one", "bob",
+                List.of("handbook", "release-notes"), password);
         unexpected += expect(api, "alice deletes the handbook", 204, "alice", HttpMethod.DELETE, "/documents/handbook",
                 password);
         System.out.println();
@@ -104,6 +111,23 @@ class DecisionCheck implements ApplicationRunner {
             request.contentType(MediaType.TEXT_PLAIN).body("Written by " + user);
         }
         return expect(request, description, expected, user, password);
+    }
+
+    /** Lists the documents as the user and compares the listed ids, in order, with the expected ones. */
+    private int expectList(RestClient api, String description, String user, List<String> expected, String password) {
+        Listed listed = api.get().uri("/documents")
+                .header("Authorization", "Bearer " + token(user, password))
+                .exchange((sent, response) -> {
+                    int status = response.getStatusCode().value();
+                    return new Listed(status, status == 200 ? response.bodyTo(List.class) : null);
+                });
+        boolean asExpected = listed.status() == 200 && expected.equals(listed.ids());
+        String mark = asExpected ? "" : "   <-- expected 200 " + expected;
+        System.out.printf("  %d %s: %s%s%n", listed.status(), description, listed.ids(), mark);
+        return asExpected ? 0 : 1;
+    }
+
+    private record Listed(int status, List<?> ids) {
     }
 
     private int expectBulkDelete(RestClient api, String description, int expected, String user, List<String> ids,
