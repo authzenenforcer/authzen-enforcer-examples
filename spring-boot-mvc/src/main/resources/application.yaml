@@ -7,9 +7,10 @@ server:
 authzen:
   pdp:
     # The only setting the starter requires: the PDP's base URL, here the realm. The endpoints come
-    # from the metadata it publishes. Plain HTTP only because Keycloak runs on this machine: the PEP's
-    # token goes to the PDP and its client secret to the token endpoint below, both derived from this
-    # URL, so use https anywhere else.
+    # from the metadata it publishes. Plain HTTP only because Keycloak runs on this machine. Use https
+    # anywhere else: the URLs below derive from this one, so the PEP's token and client secret travel
+    # over it, and so do the keys that verify the callers' tokens, which an attacker on the path could
+    # replace with their own.
     url: http://127.0.0.1:8080/realms/authzen-examples
     # The PEP's own credentials: the client credentials grant of the registration below
     client-registration-id: pdp
