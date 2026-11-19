@@ -23,8 +23,12 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          # Callers bring access tokens of the same realm
+          # Callers bring access tokens of the same realm, issued for this API: the realm adds the
+          # audience documents-api to the tokens of documents-cli. Tokens of the realm for other
+          # clients, such as the PEP's own, are rejected with 401. Keep documents-api free in the realm:
+          # Keycloak adds a client's id as audience to tokens that carry that client's roles
           issuer-uri: ${authzen.pdp.url}
+          audiences: documents-api
 
 example:
   # The PEP's own credentials: the client credentials grant of the confidential client

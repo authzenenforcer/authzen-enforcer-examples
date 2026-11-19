@@ -100,7 +100,8 @@ PDP whether a user may perform an action on a document. The realm `authzen-examp
 credentials grant and calls the AuthZEN endpoints with it.
 
 **The users' client.** The public client `documents-cli` signs the users in with the password grant,
-for the `spring-boot-mvc` example's decision check only. All users share the password in
+for the `spring-boot-mvc` example's decision check only. Its access tokens carry the audience
+`documents-api`, which the example's API requires. All users share the password in
 `EXAMPLE_USER_PASSWORD`.
 
 **Users.**
