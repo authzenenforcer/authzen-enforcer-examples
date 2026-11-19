@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.AuthZenException;
 import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
@@ -13,6 +12,7 @@ import io.github.authzenenforcer.spring.CheckPermission;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -77,6 +77,11 @@ public class ReactiveDocumentController {
      */
     @GetMapping
     public Mono<List<String>> readableDocuments(@AuthenticationPrincipal Jwt caller) {
+        if (caller == null) {
+            // Reached only if the starter lets anonymous callers through and the PDP permits them to
+            // list; documents are read with the caller's claims, so answer 401
+            return Mono.error(new AuthenticationCredentialsNotFoundException("No access token"));
+        }
         List<String> documentIds = store.ids();
         if (documentIds.isEmpty()) {
             // An empty batch would be a single evaluation of its defaults
@@ -84,8 +89,9 @@ public class ReactiveDocumentController {
         }
         return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(readEach(caller, documentIds)))
                 .map(decisions -> permitted(documentIds, decisions))
-                // No subject or no answer from the PDP: fail closed rather than list nothing
-                .onErrorMap(AuthZenException.class, failure -> new AccessDeniedException("Denied"));
+                // Whatever fails, from resolving the subject to the PDP's answer: fail closed rather
+                // than list nothing
+                .onErrorMap(failure -> new AccessDeniedException("Denied"));
     }
 
     /** One {@code read} per document, with the subject and the context entry of readDocument(). */

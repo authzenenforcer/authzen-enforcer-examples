@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
-import io.github.authzenenforcer.core.AuthZenException;
 import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
@@ -13,6 +12,7 @@ import io.github.authzenenforcer.spring.CheckPermission;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -69,6 +69,11 @@ public class DocumentController {
      */
     @GetMapping
     public List<String> list(@AuthenticationPrincipal Jwt caller) {
+        if (caller == null) {
+            // Reached only if the starter lets anonymous callers through and the PDP permits them to
+            // list; documents are read with the caller's claims, so answer 401
+            throw new AuthenticationCredentialsNotFoundException("No access token");
+        }
         List<String> ids = documents.ids();
         if (ids.isEmpty()) {
             // An empty batch would be a single evaluation of its defaults
@@ -87,8 +92,9 @@ public class DocumentController {
                     .filter(decisions::isPermitted)
                     .mapToObj(ids::get)
                     .toList();
-        } catch (AuthZenException e) {
-            // No subject or no answer from the PDP: fail closed rather than list nothing
+        } catch (RuntimeException e) {
+            // Whatever fails, from resolving the subject to the PDP's answer: fail closed rather than
+            // list nothing
             throw new AccessDeniedException("Denied");
         }
     }

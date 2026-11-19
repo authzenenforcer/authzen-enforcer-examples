@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
-import io.github.authzenenforcer.core.AuthZenException;
 import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
@@ -85,8 +84,8 @@ public class BulkDeleteController {
             ids.forEach(id -> request.evaluation(
                     EvaluationItem.builder().resource(Resource.of("document", id)).build()));
             return client.evaluations(request.build()).allPermitted();
-        } catch (AuthZenException e) {
-            // No subject or no answer from the PDP: fail closed
+        } catch (RuntimeException e) {
+            // Whatever fails, from resolving the subject to the PDP's answer: fail closed
             return false;
         }
     }
