@@ -21,6 +21,7 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 |---|---|---|
 | [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
 | [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims, a batch with `deny_on_first_deny` | Available |
+| [`spring-boot-webflux`](spring-boot-webflux) | The same application on Spring WebFlux: reactive enforcement, the reactive OAuth 2.0 client, asynchronous batches | Available |
 | `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
 | `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
@@ -78,11 +79,13 @@ With the PDP running and `DOCUMENT_PORTAL_CLIENT_SECRET` set in the same shell:
 mvn -q -f plain-java compile exec:java
 ```
 
-The `spring-boot-mvc` example is an application that keeps running; its script starts the PDP as
-well and keeps the secrets in `.env`, see [its README](spring-boot-mvc/README.md):
+The `spring-boot-mvc` and `spring-boot-webflux` examples are applications that keep running; their
+scripts start the PDP as well and keep the secrets in `.env`, see
+[spring-boot-mvc](spring-boot-mvc/README.md) and [spring-boot-webflux](spring-boot-webflux/README.md):
 
 ```bash
-spring-boot-mvc/run.sh
+spring-boot-mvc/run.sh        # on port 8081
+spring-boot-webflux/run.sh    # on port 8082
 ```
 
 Each example compares the decisions it gets with the ones the realm should make and exits with
@@ -98,11 +101,11 @@ PDP whether a user may perform an action on a document. The realm `authzen-examp
 
 **The PEP.** The confidential client `document-portal`. It obtains its access token with the client
 credentials grant and calls the AuthZEN endpoints with it: in `plain-java` with a small token client
-of its own, in `spring-boot-mvc` with Spring Security's OAuth 2.0 client.
+of its own, in the Spring Boot examples with Spring Security's OAuth 2.0 client.
 
 **The users' client.** The public client `documents-cli` signs the users in with the password grant,
-for the `spring-boot-mvc` example's decision check only. Its access tokens carry the audience
-`documents-api`, which the example's API requires. All users share the password in
+for the decision checks of the Spring Boot examples only. Its access tokens carry the audience
+`documents-api`, which the examples' APIs require. All users share the password in
 `EXAMPLE_USER_PASSWORD`.
 
 **Users.**

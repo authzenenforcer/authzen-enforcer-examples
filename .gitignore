@@ -13,6 +13,7 @@ target/
 
 ### jenv ###
 .java-version
-### Secrets and logs of the spring-boot-mvc example (spring-boot-mvc/run.sh) ###
+### Secrets and logs of the Spring Boot examples (spring-boot-mvc/run.sh, spring-boot-webflux/run.sh) ###
 .env
 app.log
+app-webflux.log
