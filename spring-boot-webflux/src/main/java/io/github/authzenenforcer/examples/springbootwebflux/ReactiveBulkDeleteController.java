@@ -39,19 +39,19 @@ import java.util.Set;
  * thread waits for the PDP.
  */
 @RestController
-public class BulkDeleteController {
+public class ReactiveBulkDeleteController {
 
     /** A batch whose size the caller chooses must stay small enough to finish within the timeout. */
-    private static final int MAX_DOCUMENTS = 10;
+    private static final int BATCH_LIMIT = 10;
 
-    private final Documents documents;
-    private final AuthZenClient client;
-    private final SubjectResolver subjects;
+    private final Documents store;
+    private final AuthZenClient pdp;
+    private final SubjectResolver subjectResolver;
 
-    BulkDeleteController(Documents documents, AuthZenClient client, SubjectResolver subjects) {
-        this.documents = documents;
-        this.client = client;
-        this.subjects = subjects;
+    ReactiveBulkDeleteController(Documents store, AuthZenClient pdp, SubjectResolver subjectResolver) {
+        this.store = store;
+        this.pdp = pdp;
+        this.subjectResolver = subjectResolver;
     }
 
     /**
@@ -61,38 +61,38 @@ public class BulkDeleteController {
      */
     @PostMapping("/documents/bulk-delete")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> bulkDelete(@AuthenticationPrincipal Jwt caller, @RequestBody List<String> ids) {
+    public Mono<Void> deleteDocuments(@AuthenticationPrincipal Jwt caller, @RequestBody Mono<List<String>> body) {
         if (caller == null) {
             // Spring Security's entry point answers with 401
             return Mono.error(new AuthenticationCredentialsNotFoundException("No access token"));
         }
-        Set<String> unique = new LinkedHashSet<>(ids);
-        if (unique.isEmpty() || unique.size() > MAX_DOCUMENTS || unique.contains(null)) {
-            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "List between 1 and " + MAX_DOCUMENTS + " document ids"));
-        }
-        return permitted(caller, unique)
-                .flatMap(permitted -> {
-                    if (!permitted) {
-                        return Mono.error(new AccessDeniedException("Denied"));
-                    }
-                    documents.deleteAll(unique);
-                    return Mono.<Void>empty();
-                });
+        return body.map(LinkedHashSet::new)
+                .filter(documentIds -> !documentIds.isEmpty() && documentIds.size() <= BATCH_LIMIT
+                        && !documentIds.contains(null))
+                .switchIfEmpty(Mono.error(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "List between 1 and " + BATCH_LIMIT + " document ids")))
+                .flatMap(documentIds -> allDeletable(caller, documentIds)
+                        .filter(Boolean::booleanValue)
+                        .switchIfEmpty(Mono.error(() -> new AccessDeniedException("Denied")))
+                        .doOnNext(permitted -> store.deleteAll(documentIds)))
+                .then();
     }
 
-    private Mono<Boolean> permitted(Jwt caller, Set<String> ids) {
-        return Mono.defer(() -> {
-                    EvaluationsRequest.Builder request = EvaluationsRequest.builder()
-                            .subject(subjects.resolve(caller.getClaims()))
-                            .action(Action.of("delete"))
-                            .semantic(EvaluationsSemantic.DENY_ON_FIRST_DENY);
-                    ids.forEach(id -> request.evaluation(
-                            EvaluationItem.builder().resource(Resource.of("document", id)).build()));
-                    return Mono.fromCompletionStage(() -> client.evaluationsAsync(request.build()));
-                })
+    private Mono<Boolean> allDeletable(Jwt caller, Set<String> documentIds) {
+        return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(deleteEach(caller, documentIds)))
                 .map(EvaluationsResponse::allPermitted)
                 // No subject or no answer from the PDP: fail closed
                 .onErrorReturn(AuthZenException.class, false);
+    }
+
+    private EvaluationsRequest deleteEach(Jwt caller, Set<String> documentIds) {
+        EvaluationsRequest.Builder batch = EvaluationsRequest.builder()
+                .subject(subjectResolver.resolve(caller.getClaims()))
+                .action(Action.of("delete"))
+                .semantic(EvaluationsSemantic.DENY_ON_FIRST_DENY);
+        for (String documentId : documentIds) {
+            batch.evaluation(EvaluationItem.builder().resource(Resource.of("document", documentId)).build());
+        }
+        return batch.build();
     }
 }

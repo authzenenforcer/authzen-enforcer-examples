@@ -25,10 +25,10 @@ import java.time.Duration;
 /**
  * The backend of the document portal: a Spring WebFlux application whose endpoints the AuthZEN
  * Enforcer protects. The starter asks the PDP before every handler annotated with
- * {@code @CheckPermission}; see {@link DocumentController}.
+ * {@code @CheckPermission}; see {@link ReactiveDocumentController}.
  */
 @SpringBootApplication
-public class DocumentsApplication {
+public class ReactiveDocumentsApplication {
 
     public static void main(String[] args) {
         // application.yaml takes the PEP's client secret from this variable. Without it, Spring Boot
@@ -38,7 +38,7 @@ public class DocumentsApplication {
             System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
             System.exit(2);
         }
-        SpringApplication.run(DocumentsApplication.class, args);
+        SpringApplication.run(ReactiveDocumentsApplication.class, args);
     }
 
     /**

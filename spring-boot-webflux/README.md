@@ -15,7 +15,7 @@ settings and decision check, with the same results. What differs is listed under
 
 - **Zero configuration for the PDP.** `authzen.pdp.url` is the only setting the starter needs; it
   finds the endpoints in the PDP's metadata.
-- **Inference.** [`DocumentController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/DocumentController.java)
+- **Inference.** [`ReactiveDocumentController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/ReactiveDocumentController.java)
   names no action and no resource. `GET /documents/handbook` becomes `read` on
   `{"type": "document", "id": "handbook"}`, `GET /documents` becomes `list` on
   `{"type": "collection", "id": "document"}`, and the subject is the caller of the access token.
@@ -26,7 +26,7 @@ settings and decision check, with the same results. What differs is listed under
   with an expression. Expressions can read path variables, a few values of the request and the
   caller's claims, never the caller's token.
 - **A batch with `deny_on_first_deny`.**
-  [`BulkDeleteController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/BulkDeleteController.java)
+  [`ReactiveBulkDeleteController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/ReactiveBulkDeleteController.java)
   deletes several documents at once, all or none. `@CheckPermission` asks about one resource, so
   the handler asks the PDP itself, with the starter's `AuthZenClient` and `SubjectResolver`: one
   Access Evaluations request with a `delete` for every document and
@@ -34,7 +34,7 @@ settings and decision check, with the same results. What differs is listed under
   document the caller may not delete. A decision it did not return counts as a deny.
 - **Filtering a list.** The `list` decision on `GET /documents` is about the collection, not about
   the documents in it: it lets the handler run, and the handler decides what it returns. So
-  `DocumentController` asks the PDP about every document in one Access Evaluations request, with
+  `ReactiveDocumentController` asks the PDP about every document in one Access Evaluations request, with
   the same `read`, subject and context as reading one, and returns only the permitted ones. A
   decision per document needs a PDP that can decide about each of them; this realm knows only the
   documents it was created with, so a document created later is never listed. With pagination,
@@ -43,7 +43,7 @@ settings and decision check, with the same results. What differs is listed under
 - **The PEP's own identity.** The application authenticates to the PDP as the confidential client
   `document-portal`, with the client credentials grant. `authzen.pdp.client-registration-id` names
   the registration of Spring Security's OAuth 2.0 client that obtains, caches and renews the token,
-  and `DocumentsApplication` adds connect and response timeouts to its token requests. The starter never forwards the
+  and `ReactiveDocumentsApplication` adds connect and response timeouts to its token requests. The starter never forwards the
   caller's token.
 - **Tokens issued for this API only.** Spring Security accepts an access token of the realm only
   if its audience is `documents-api`, which the realm adds to the tokens of `documents-cli`. Any
@@ -143,9 +143,10 @@ All statuses are as expected.
 - **The PEP's token.** In a WebFlux application, Spring Boot creates the reactive OAuth 2.0 client,
   and the starter uses it with the same registration: no thread waits for the token request. A
   `ReactiveOAuth2AccessTokenResponseClient` bean gives it timeouts.
-- **Handlers that ask the PDP themselves.** `list` and `bulkDelete` return a `Mono` and call
+- **Reactive handlers.** Every handler returns a `Mono` and reads its body as a `Mono`. The two
+  that ask the PDP themselves, `readableDocuments` and `deleteDocuments`, call
   `AuthZenClient.evaluationsAsync`, so no thread waits for the PDP either.
-- **Stateless security.** `DocumentsApplication` defines a `SecurityWebFilterChain` without a
+- **Stateless security.** `ReactiveDocumentsApplication` defines a `SecurityWebFilterChain` without a
   session, with the same CSRF rule as the servlet example: requests with an `Authorization` header
   need no CSRF token.
 - **Netty on macOS.** At startup, Netty may log an error that it cannot load

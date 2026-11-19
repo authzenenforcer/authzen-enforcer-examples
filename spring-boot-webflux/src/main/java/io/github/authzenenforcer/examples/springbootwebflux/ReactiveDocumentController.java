@@ -7,6 +7,7 @@ import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.Context;
 import io.github.authzenenforcer.core.model.EvaluationItem;
 import io.github.authzenenforcer.core.model.EvaluationsRequest;
+import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.Resource;
 import io.github.authzenenforcer.spring.CheckPermission;
 
@@ -35,36 +36,36 @@ import java.util.stream.IntStream;
  * route. {@code GET /documents/handbook} asks whether the caller may {@code read}
  * {@code {"type": "document", "id": "handbook"}}, and {@code GET /documents} whether it may
  * {@code list} {@code {"type": "collection", "id": "document"}}. The subject is the caller of the
- * access token. The handler runs only if the PDP permits the request; {@link #list(Jwt)} then
- * filters the documents.
+ * access token. The handler runs only if the PDP permits the request;
+ * {@link #readableDocuments(Jwt)} then filters the documents.
  *
- * <p>The starter decides before the handler's arguments are resolved, so a request body is not read
- * for a request that the PDP denies. The decision starts on Reactor's bounded elastic scheduler and
- * does not block the event loop.
+ * <p>The starter decides before the handler's arguments are resolved, so the body of a request that
+ * the PDP denies is never read. The decision starts on Reactor's bounded elastic scheduler and does
+ * not block the event loop.
  */
 @RestController
 @RequestMapping("/documents")
 @CheckPermission
-public class DocumentController {
+public class ReactiveDocumentController {
 
-    private final Documents documents;
-    private final AuthZenClient client;
-    private final SubjectResolver subjects;
+    private final Documents store;
+    private final AuthZenClient pdp;
+    private final SubjectResolver subjectResolver;
 
-    DocumentController(Documents documents, AuthZenClient client, SubjectResolver subjects) {
-        this.documents = documents;
-        this.client = client;
-        this.subjects = subjects;
+    ReactiveDocumentController(Documents store, AuthZenClient pdp, SubjectResolver subjectResolver) {
+        this.store = store;
+        this.pdp = pdp;
+        this.subjectResolver = subjectResolver;
     }
 
     /**
      * Lists the documents the caller may read. {@code @CheckPermission} decides whether the caller
      * may list the collection at all; that decision is about the collection, not about the
      * documents in it, so the handler filters them itself. One Access Evaluations request asks for a
-     * {@code read} of every document, with the same subject and context as {@link #read(String)},
-     * so that the list shows exactly the documents the caller could open. The default semantic,
-     * {@code execute_all}, returns a decision for each; the client rejects an answer that lacks one,
-     * and that fails the request like any other failure of the PDP.
+     * {@code read} of every document, with the same subject and context as
+     * {@link #readDocument(String)}, so that the list shows exactly the documents the caller could
+     * open. The default semantic, {@code execute_all}, returns a decision for each; the client
+     * rejects an answer that lacks one, and that fails the request like any other failure of the PDP.
      *
      * <p>The request goes out with the client's asynchronous method, so no thread waits for the PDP;
      * cancelling the response cancels it.
@@ -75,35 +76,42 @@ public class DocumentController {
      * come back short and the totals count documents the caller cannot see.
      */
     @GetMapping
-    public Mono<List<String>> list(@AuthenticationPrincipal Jwt caller) {
-        List<String> ids = documents.ids();
-        if (ids.isEmpty()) {
+    public Mono<List<String>> readableDocuments(@AuthenticationPrincipal Jwt caller) {
+        List<String> documentIds = store.ids();
+        if (documentIds.isEmpty()) {
             // An empty batch would be a single evaluation of its defaults
-            return Mono.just(ids);
+            return Mono.just(documentIds);
         }
-        return Mono.defer(() -> {
-                    EvaluationsRequest.Builder request = EvaluationsRequest.builder()
-                            .subject(subjects.resolve(caller.getClaims()))
-                            .action(Action.of("read"))
-                            // The value of the context entry of read()
-                            .context(Context.builder()
-                                    .put("mfa", "mfa".equals(caller.getClaimAsString("acr"))).build());
-                    ids.forEach(id -> request.evaluation(
-                            EvaluationItem.builder().resource(Resource.of("document", id)).build()));
-                    return Mono.fromCompletionStage(() -> client.evaluationsAsync(request.build()));
-                })
-                .map(decisions -> IntStream.range(0, ids.size())
-                        .filter(decisions::isPermitted)
-                        .mapToObj(ids::get)
-                        .toList())
+        return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(readEach(caller, documentIds)))
+                .map(decisions -> permitted(documentIds, decisions))
                 // No subject or no answer from the PDP: fail closed rather than list nothing
-                .onErrorMap(AuthZenException.class, e -> new AccessDeniedException("Denied"));
+                .onErrorMap(AuthZenException.class, failure -> new AccessDeniedException("Denied"));
+    }
+
+    /** One {@code read} per document, with the subject and the context entry of readDocument(). */
+    private EvaluationsRequest readEach(Jwt caller, List<String> documentIds) {
+        boolean secondFactor = "mfa".equals(caller.getClaimAsString("acr"));
+        EvaluationsRequest.Builder batch = EvaluationsRequest.builder()
+                .subject(subjectResolver.resolve(caller.getClaims()))
+                .action(Action.of("read"))
+                .context(Context.builder().put("mfa", secondFactor).build());
+        for (String documentId : documentIds) {
+            batch.evaluation(EvaluationItem.builder().resource(Resource.of("document", documentId)).build());
+        }
+        return batch.build();
+    }
+
+    private static List<String> permitted(List<String> documentIds, EvaluationsResponse decisions) {
+        return IntStream.range(0, documentIds.size())
+                .filter(decisions::isPermitted)
+                .mapToObj(documentIds::get)
+                .toList();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public String create(@RequestBody String content) {
-        return documents.create(content);
+    public Mono<String> createDocument(@RequestBody Mono<String> content) {
+        return content.map(store::create);
     }
 
     /**
@@ -116,8 +124,8 @@ public class DocumentController {
      */
     @CheckPermission(context = "mfa=#claims?.['acr'] == 'mfa'")
     @GetMapping("/{id}")
-    public String read(@PathVariable String id) {
-        return documents.get(id);
+    public Mono<String> readDocument(@PathVariable String id) {
+        return Mono.fromSupplier(() -> store.get(id));
     }
 
     /**
@@ -130,18 +138,18 @@ public class DocumentController {
      */
     @CheckPermission(action = "read", resourceType = "document", resourceId = "#id")
     @GetMapping("/{id}/download")
-    public String download(@PathVariable String id) {
-        return documents.get(id);
+    public Mono<String> downloadDocument(@PathVariable String id) {
+        return readDocument(id);
     }
 
     @PutMapping("/{id}")
-    public void update(@PathVariable String id, @RequestBody String content) {
-        documents.update(id, content);
+    public Mono<Void> replaceDocument(@PathVariable String id, @RequestBody Mono<String> content) {
+        return content.doOnNext(text -> store.update(id, text)).then();
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable String id) {
-        documents.delete(id);
+    public Mono<Void> deleteDocument(@PathVariable String id) {
+        return Mono.fromRunnable(() -> store.delete(id));
     }
 }

@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * The documents of the portal, kept in memory and shared by {@link DocumentController} and
- * {@link BulkDeleteController}.
+ * The documents of the portal, kept in memory and shared by {@link ReactiveDocumentController} and
+ * {@link ReactiveBulkDeleteController}.
  */
 @Component
 class Documents {

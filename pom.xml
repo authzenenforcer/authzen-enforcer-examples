@@ -29,9 +29,8 @@
         <sonar.projectName>authzen-enforcer-examples</sonar.projectName>
         <!-- The examples have no unit tests; CI runs them against the PDP instead -->
         <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
-        <!-- Each example is standalone, and spring-boot-webflux mirrors spring-boot-mvc on purpose, so
-             that the two stacks can be compared side by side: its classes repeat those of
-             spring-boot-mvc instead of sharing a module -->
-        <sonar.cpd.exclusions>**/springbootwebflux/**</sonar.cpd.exclusions>
+        <!-- Each example is standalone, so spring-boot-webflux carries its own copy of the document
+             store and the decision check of spring-boot-mvc instead of sharing a module -->
+        <sonar.cpd.exclusions>**/springbootwebflux/Documents.java,**/springbootwebflux/DecisionCheck.java</sonar.cpd.exclusions>
     </properties>
 </project>
