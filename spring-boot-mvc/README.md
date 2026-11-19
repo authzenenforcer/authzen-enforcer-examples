@@ -43,7 +43,11 @@ too.
   cannot see.
 - **The PEP's own identity.** The application authenticates to the PDP as the confidential client
   `document-portal`, with the client credentials grant. It never forwards the caller's token.
-- **Answers.** No token: `401` with Spring Security's challenge. A deny or a PDP failure: `403`.
+- **Tokens issued for this API only.** Spring Security accepts an access token of the realm only
+  if its audience is `documents-api`, which the realm adds to the tokens of `documents-cli`. Any
+  other token of the realm, such as the one the PEP obtains for the PDP, gets `401`.
+- **Answers.** No token, or a token not issued for this API: `401` with Spring Security's
+  challenge. A deny or a PDP failure: `403`.
 
 ## Running it
 
@@ -108,6 +112,7 @@ A document
   200 bob updates the handbook
   403 bob deletes the handbook
   403 dave (hr) reads the salary report without MFA
+  401 the PEP's own token reads the handbook
 
 The document collection
   200 carol lists the documents: [handbook, release-notes]

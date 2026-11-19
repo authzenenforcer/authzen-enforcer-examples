@@ -34,14 +34,17 @@ class DecisionCheck implements ApplicationRunner {
     private final Environment environment;
     private final RestClient tokens;
     private final String userClientId;
+    private final String clientId;
     private final Map<String, String> userTokens = new HashMap<>();
 
     DecisionCheck(ConfigurableApplicationContext context, Environment environment,
-            @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId) {
+            @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId,
+            @Value("${example.client-id}") String clientId) {
         this.context = context;
         this.environment = environment;
         this.tokens = RestClient.create(tokenUrl);
         this.userClientId = userClientId;
+        this.clientId = clientId;
     }
 
     @Override
@@ -71,6 +74,9 @@ class DecisionCheck implements ApplicationRunner {
                 password);
         unexpected += expect(api, "dave (hr) reads the salary report without MFA", 403, "dave", HttpMethod.GET,
                 "/documents/salary-report", password);
+        // The realm issued this token to the PEP for the PDP, not for this API
+        unexpected += expectStatus(api.get().uri("/documents/handbook").header("Authorization", "Bearer " + pepToken()),
+                "the PEP's own token reads the handbook", 401);
         System.out.println();
         System.out.println("The document collection");
         // Nobody may read the salary report without MFA, so it is not listed
@@ -143,6 +149,10 @@ class DecisionCheck implements ApplicationRunner {
         if (user != null) {
             request.header("Authorization", "Bearer " + token(user, password));
         }
+        return expectStatus(request, description, expected);
+    }
+
+    private int expectStatus(RestClient.RequestHeadersSpec<?> request, String description, int expected) {
         int status = request.exchange((sent, response) -> response.getStatusCode().value());
         String mark = status == expected ? "" : "   <-- expected " + expected;
         System.out.printf("  %d %s%s%n", status, description, mark);
@@ -156,16 +166,29 @@ class DecisionCheck implements ApplicationRunner {
             form.add("client_id", userClientId);
             form.add("username", name);
             form.add("password", password);
-            Map<?, ?> response = tokens.post()
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body(form)
-                    .retrieve()
-                    .body(Map.class);
-            if (response == null || !(response.get("access_token") instanceof String token)) {
-                throw new IllegalStateException("The token endpoint answered without a token for " + name);
-            }
-            return token;
+            return accessToken(form, name);
         });
+    }
+
+    /** The PEP's own token, from the client credentials grant, as the PEP obtains it for the PDP. */
+    private String pepToken() {
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("grant_type", "client_credentials");
+        form.add("client_id", clientId);
+        form.add("client_secret", System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET"));
+        return accessToken(form, clientId);
+    }
+
+    private String accessToken(MultiValueMap<String, String> form, String name) {
+        Map<?, ?> response = tokens.post()
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve()
+                .body(Map.class);
+        if (response == null || !(response.get("access_token") instanceof String token)) {
+            throw new IllegalStateException("The token endpoint answered without a token for " + name);
+        }
+        return token;
     }
 
     private void exit(int status) {
