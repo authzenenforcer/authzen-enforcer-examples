@@ -378,7 +378,7 @@
     },
     {
       "clientId": "documents-cli",
-      "name": "Users of the spring-boot-mvc example's decision check",
+      "name": "Users of the decision checks of the Spring Boot examples",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": false,

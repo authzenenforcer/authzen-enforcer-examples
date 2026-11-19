@@ -5,7 +5,8 @@ authzen-enforcer in a Spring Boot 4 application with Spring MVC and Spring Secur
 `@CheckPermission` and answers with `401` or `403` when it may not run.
 
 Spring Boot offers two web stacks: Spring MVC on servlets, used here, and the reactive Spring
-WebFlux. The starter supports both; a WebFlux example follows.
+WebFlux. The starter supports both; [spring-boot-webflux](../spring-boot-webflux) is the same
+application on WebFlux.
 
 > The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.3.0.
 

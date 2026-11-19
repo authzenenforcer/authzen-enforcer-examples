@@ -1,0 +1,52 @@
+# The defaults fit the Keycloak of compose.yaml. Override any of them on the command line, such as
+# --authzen.pdp.url=..., or with environment variables, such as AUTHZEN_PDP_URL=...
+server:
+  # Keycloak uses 8080, the spring-boot-mvc example 8081
+  port: 8082
+
+authzen:
+  pdp:
+    # The only setting the starter requires: the PDP's base URL, here the realm. The endpoints come
+    # from the metadata it publishes. Plain HTTP only because Keycloak runs on this machine. Use https
+    # anywhere else: the URLs below derive from this one, so the PEP's token and client secret travel
+    # over it, and so do the keys that verify the callers' tokens, which an attacker on the path could
+    # replace with their own.
+    url: http://127.0.0.1:8080/realms/authzen-examples
+    # The PEP's own credentials: the client credentials grant of the registration below
+    client-registration-id: pdp
+  enforcer:
+    subject:
+      # The realm's policies name users by their username. The default, sub, is a stable id and is
+      # the better choice where the PDP knows it
+      id-claim: preferred_username
+    resource:
+      # /documents/{id} becomes {"type": "document", ...}, the type of the realm's resources
+      singularize: true
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          pdp:
+            # The confidential client document-portal. Its secret comes from the environment
+            # variable DOCUMENT_PORTAL_CLIENT_SECRET, never from a file or the command line
+            client-id: document-portal
+            client-secret: ${DOCUMENT_PORTAL_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          pdp:
+            token-uri: ${authzen.pdp.url}/protocol/openid-connect/token
+      resourceserver:
+        jwt:
+          # Callers bring access tokens of the same realm, issued for this API: the realm adds the
+          # audience documents-api to the tokens of documents-cli. Tokens of the realm for other
+          # clients, such as the PEP's own, are rejected with 401. Keep documents-api free in the realm:
+          # Keycloak adds a client's id as audience to tokens that carry that client's roles
+          issuer-uri: ${authzen.pdp.url}
+          audiences: documents-api
+
+example:
+  # The decision check gets user tokens from the public client documents-cli
+  token-url: ${authzen.pdp.url}/protocol/openid-connect/token
+  user-client-id: documents-cli

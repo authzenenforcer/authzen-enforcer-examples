@@ -72,6 +72,8 @@ jobs:
         run: .github/scripts/mvn-retry.sh -B -ntp -q -f plain-java exec:java
       - name: Run the decision check of spring-boot-mvc
         run: spring-boot-mvc/run.sh check
+      - name: Run the decision check of spring-boot-webflux
+        run: spring-boot-webflux/run.sh check
       - name: Keycloak logs
         if: failure()
         run: docker compose logs keycloak
