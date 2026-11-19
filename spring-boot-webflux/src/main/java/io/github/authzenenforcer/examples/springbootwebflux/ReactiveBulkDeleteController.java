@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.AuthZenException;
 import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
@@ -81,8 +80,8 @@ public class ReactiveBulkDeleteController {
     private Mono<Boolean> allDeletable(Jwt caller, Set<String> documentIds) {
         return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(deleteEach(caller, documentIds)))
                 .map(EvaluationsResponse::allPermitted)
-                // No subject or no answer from the PDP: fail closed
-                .onErrorReturn(AuthZenException.class, false);
+                // Whatever fails, from resolving the subject to the PDP's answer: fail closed
+                .onErrorReturn(false);
     }
 
     private EvaluationsRequest deleteEach(Jwt caller, Set<String> documentIds) {
