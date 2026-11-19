@@ -31,8 +31,8 @@ public class DocumentsApplication {
         // would send the unresolved placeholder as the secret and every request would be denied
         String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
         if (secret == null || secret.isEmpty()) {
-            throw new IllegalStateException(
-                    "Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
+            System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
+            System.exit(2);
         }
         SpringApplication.run(DocumentsApplication.class, args);
     }
