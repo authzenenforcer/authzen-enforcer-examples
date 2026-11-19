@@ -27,6 +27,13 @@ import java.time.Duration;
 public class DocumentsApplication {
 
     public static void main(String[] args) {
+        // application.yaml takes the PEP's client secret from this variable. Without it, Spring Boot
+        // would send the unresolved placeholder as the secret and every request would be denied
+        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
+        if (secret == null || secret.isEmpty()) {
+            throw new IllegalStateException(
+                    "Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
+        }
         SpringApplication.run(DocumentsApplication.class, args);
     }
 

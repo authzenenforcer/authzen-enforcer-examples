@@ -33,6 +33,8 @@ spring:
             authorization-grant-type: client_credentials
         provider:
           pdp:
+            # Plain HTTP only because Keycloak runs on this machine; elsewhere use https, since the
+            # secret travels in this request
             token-uri: ${authzen.pdp.url}/protocol/openid-connect/token
       resourceserver:
         jwt:
