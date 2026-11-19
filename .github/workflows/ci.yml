@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+# Maven Central sometimes answers 429 or a short-lived 404 for a file it has. .mvn/maven.config
+# makes Maven retry 429 and 503, and Maven runs through mvn-retry.sh, which tries again with -U
+# when a download failed
+
 jobs:
   pdp:
     name: PDP decisions (Keycloak)
@@ -63,9 +67,9 @@ jobs:
       - name: Start Keycloak
         run: docker compose up --wait
       - name: Build
-        run: mvn -B -ntp verify
+        run: .github/scripts/mvn-retry.sh -B -ntp verify
       - name: Run plain-java
-        run: mvn -B -ntp -q -f plain-java exec:java
+        run: .github/scripts/mvn-retry.sh -B -ntp -q -f plain-java exec:java
       - name: Run the decision check of spring-boot-mvc
         run: spring-boot-mvc/run.sh check
       - name: Keycloak logs
