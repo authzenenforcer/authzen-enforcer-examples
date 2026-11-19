@@ -97,7 +97,8 @@ PDP whether a user may perform an action on a document. The realm `authzen-examp
 ([`keycloak/authzen-examples-realm.json`](keycloak/authzen-examples-realm.json)) contains:
 
 **The PEP.** The confidential client `document-portal`. It obtains its access token with the client
-credentials grant and calls the AuthZEN endpoints with it.
+credentials grant and calls the AuthZEN endpoints with it: in `plain-java` with a small token client
+of its own, in `spring-boot-mvc` with Spring Security's OAuth 2.0 client.
 
 **The users' client.** The public client `documents-cli` signs the users in with the password grant,
 for the `spring-boot-mvc` example's decision check only. Its access tokens carry the audience

@@ -5,12 +5,9 @@ authzen-enforcer in a Spring Boot 4 application with Spring MVC and Spring Secur
 `@CheckPermission` and answers with `401` or `403` when it may not run.
 
 Spring Boot offers two web stacks: Spring MVC on servlets, used here, and the reactive Spring
-WebFlux. The starter supports Spring MVC for now; a WebFlux example follows once it supports that
-too.
+WebFlux. The starter supports both; a WebFlux example follows.
 
-> The starter is a preview, available since authzen-enforcer 0.2.0. It supports Spring MVC;
-> WebFlux, an adapter for Spring Security's OAuth 2.0 client and the auto-configuration of metrics
-> follow.
+> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.3.0.
 
 ## What it shows
 
@@ -42,7 +39,10 @@ too.
   filter before paging, or the pages come back short and the totals count documents the caller
   cannot see.
 - **The PEP's own identity.** The application authenticates to the PDP as the confidential client
-  `document-portal`, with the client credentials grant. It never forwards the caller's token.
+  `document-portal`, with the client credentials grant. `authzen.pdp.client-registration-id` names
+  the registration of Spring Security's OAuth 2.0 client that obtains, caches and renews the token,
+  and `DocumentsApplication` adds timeouts to its token requests. The starter never forwards the
+  caller's token.
 - **Tokens issued for this API only.** Spring Security accepts an access token of the realm only
   if its audience is `documents-api`, which the realm adds to the tokens of `documents-cli`. Any
   other token of the realm, such as the one the PEP obtains for the PDP, gets `401`.
@@ -143,7 +143,8 @@ such as `AUTHZEN_PDP_URL`.
 | `authzen.enforcer.subject.id-claim` | `preferred_username` | The realm's policies name users by username |
 | `authzen.enforcer.resource.singularize` | `true` | `/documents/{id}` becomes the type `document` |
 | `server.port` | `8081` | Keycloak uses `8080` |
-| `example.client-id` | `document-portal` | The PEP's client; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
+| `authzen.pdp.client-registration-id` | `pdp` | The registration that obtains the PEP's token |
+| `spring.security.oauth2.client.registration.pdp.client-id` | `document-portal` | The PEP's client; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
 | `example.user-client-id` | `documents-cli` | The client the decision check gets user tokens from; the password comes from `EXAMPLE_USER_PASSWORD` |
 
 ## Not shown

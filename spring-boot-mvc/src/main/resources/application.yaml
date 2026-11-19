@@ -9,6 +9,8 @@ authzen:
     # The only setting the starter requires: the PDP's base URL, here the realm. The endpoints come
     # from the metadata it publishes.
     url: http://127.0.0.1:8080/realms/authzen-examples
+    # The PEP's own credentials: the client credentials grant of the registration below
+    client-registration-id: pdp
   enforcer:
     subject:
       # The realm's policies name users by their username. The default, sub, is a stable id and is
@@ -21,6 +23,17 @@ authzen:
 spring:
   security:
     oauth2:
+      client:
+        registration:
+          pdp:
+            # The confidential client document-portal. Its secret comes from the environment
+            # variable DOCUMENT_PORTAL_CLIENT_SECRET, never from a file or the command line
+            client-id: document-portal
+            client-secret: ${DOCUMENT_PORTAL_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          pdp:
+            token-uri: ${authzen.pdp.url}/protocol/openid-connect/token
       resourceserver:
         jwt:
           # Callers bring access tokens of the same realm, issued for this API: the realm adds the
@@ -31,9 +44,6 @@ spring:
           audiences: documents-api
 
 example:
-  # The PEP's own credentials: the client credentials grant of the confidential client
-  # document-portal. Its secret comes from DOCUMENT_PORTAL_CLIENT_SECRET.
+  # The decision check gets user tokens from the public client documents-cli
   token-url: ${authzen.pdp.url}/protocol/openid-connect/token
-  client-id: document-portal
-  # The public client that the decision check gets user tokens from
   user-client-id: documents-cli

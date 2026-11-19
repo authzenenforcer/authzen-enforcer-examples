@@ -39,7 +39,7 @@ class DecisionCheck implements ApplicationRunner {
 
     DecisionCheck(ConfigurableApplicationContext context, Environment environment,
             @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId,
-            @Value("${example.client-id}") String clientId) {
+            @Value("${spring.security.oauth2.client.registration.pdp.client-id}") String clientId) {
         this.context = context;
         this.environment = environment;
         this.tokens = RestClient.create(tokenUrl);

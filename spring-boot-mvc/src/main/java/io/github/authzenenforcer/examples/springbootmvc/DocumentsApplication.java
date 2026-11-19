@@ -1,17 +1,22 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
-import io.github.authzenenforcer.core.auth.CredentialProvider;
-
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.OAuth2ClientCredentialsGrantRequest;
+import org.springframework.security.oauth2.client.endpoint.RestClientClientCredentialsTokenResponseClient;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.client.RestClient;
 
-import java.net.URI;
+import java.time.Duration;
 
 /**
  * The backend of the document portal: a Spring MVC application whose endpoints the AuthZEN
@@ -26,19 +31,27 @@ public class DocumentsApplication {
     }
 
     /**
-     * How the PEP authenticates to the PDP: with its own access token, from the client credentials
-     * grant. The starter never forwards the caller's token to the PDP.
+     * How the PEP obtains its own access token for the PDP: the starter uses Spring Security's
+     * OAuth 2.0 client with the registration of {@code authzen.pdp.client-registration-id}, and never
+     * forwards the caller's token. This bean only adds timeouts to the token requests, which Spring
+     * Security's default client does not set; the converters and the error handler are its defaults.
      */
     @Bean
-    CredentialProvider pdpCredentials(@Value("${example.token-url}") URI tokenUrl,
-            @Value("${example.client-id}") String clientId) {
-        // From the environment, never from a file or the command line
-        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
-        if (secret == null || secret.isEmpty()) {
-            throw new IllegalStateException("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client "
-                    + clientId);
-        }
-        return new ClientCredentialsTokens(tokenUrl, clientId, secret);
+    OAuth2AccessTokenResponseClient<OAuth2ClientCredentialsGrantRequest> tokenResponseClient() {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(2));
+        requestFactory.setReadTimeout(Duration.ofSeconds(5));
+        RestClient restClient = RestClient.builder()
+                .requestFactory(requestFactory)
+                .configureMessageConverters(converters -> {
+                    converters.addCustomConverter(new FormHttpMessageConverter());
+                    converters.addCustomConverter(new OAuth2AccessTokenResponseHttpMessageConverter());
+                })
+                .defaultStatusHandler(new OAuth2ErrorResponseErrorHandler())
+                .build();
+        RestClientClientCredentialsTokenResponseClient client = new RestClientClientCredentialsTokenResponseClient();
+        client.setRestClient(restClient);
+        return client;
     }
 
     /**
