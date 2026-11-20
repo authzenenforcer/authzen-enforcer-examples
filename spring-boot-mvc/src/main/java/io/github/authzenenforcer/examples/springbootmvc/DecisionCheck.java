@@ -1,5 +1,10 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
+import io.github.authzenenforcer.micrometer.AuthZenClientMetrics;
+import io.github.authzenenforcer.micrometer.EnforcerMetrics;
+import io.github.authzenenforcer.micrometer.MicrometerPepListener;
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -14,9 +19,12 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Calls the application's own endpoints as the users of the realm once it has started, prints the
@@ -30,18 +38,23 @@ import java.util.Map;
 @ConditionalOnProperty(name = "example.check", havingValue = "true")
 class DecisionCheck implements ApplicationRunner {
 
+    // Listeners get the events on a thread of their own, shortly after the calls
+    private static final Duration EVENT_WAIT = Duration.ofSeconds(10);
+
     private final ConfigurableApplicationContext context;
     private final Environment environment;
+    private final MeterRegistry registry;
     private final RestClient tokens;
     private final String userClientId;
     private final String clientId;
     private final Map<String, String> userTokens = new HashMap<>();
 
-    DecisionCheck(ConfigurableApplicationContext context, Environment environment,
+    DecisionCheck(ConfigurableApplicationContext context, Environment environment, MeterRegistry registry,
             @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId,
             @Value("${spring.security.oauth2.client.registration.pdp.client-id}") String clientId) {
         this.context = context;
         this.environment = environment;
+        this.registry = registry;
         this.tokens = RestClient.create(tokenUrl);
         this.userClientId = userClientId;
         this.clientId = clientId;
@@ -101,13 +114,106 @@ class DecisionCheck implements ApplicationRunner {
         unexpected += expectBulkDelete(api, "alice deletes the release notes and the salary report", 204, "alice",
                 List.of("release-notes", "salary-report"), password);
         System.out.println();
+        System.out.println("Actuator");
+        // Known once the management server has started; a port of its own, on 127.0.0.1
+        RestClient actuator = RestClient.create("http://127.0.0.1:" + environment.getProperty("local.management.port"));
+        unexpected += expectStatus(actuator.get().uri("/actuator/health/authzen"), "the authzen health indicator", 200);
+        unexpected += expectStatus(actuator.get().uri("/actuator/metrics/" + MicrometerPepListener.ENFORCEMENTS),
+                "the meter " + MicrometerPepListener.ENFORCEMENTS, 200);
+        unexpected += expectStatus(api.get().uri("/actuator/health"), "Actuator on the port of the API", 404);
+        System.out.println();
+        System.out.println("Metrics");
+        unexpected += expectMeters();
+        System.out.println();
         if (unexpected > 0) {
-            System.out.printf("%d status(es) differ from the expected ones.%n", unexpected);
+            System.out.printf("%d status(es) or meter(s) differ from the expected ones.%n", unexpected);
             exit(1);
             return;
         }
-        System.out.println("All statuses are as expected.");
+        System.out.println("All statuses and meters are as expected.");
         exit(0);
+    }
+
+    /**
+     * Prints the meters of the requests above and compares them with those they should have
+     * recorded. The numbers of enforcements and calls are exact: every run makes the same requests.
+     * Attempts and dropped events only need to be there.
+     */
+    private int expectMeters() {
+        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        List<String> missing = missingMeters();
+        while (!missing.isEmpty() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            missing = missingMeters();
+        }
+        Map<String, Long> lines = new TreeMap<>();
+        for (Meter meter : registry.getMeters()) {
+            String name = meter.getId().getName();
+            if (name.equals(MicrometerPepListener.ENFORCEMENTS) || name.equals(MicrometerPepListener.CALLS)) {
+                lines.merge(describe(meter), value(meter), Long::sum);
+            }
+        }
+        lines.forEach((meter, value) -> System.out.printf("  %-3d %s%n", value, meter));
+        for (String problem : missing) {
+            System.out.println("  <-- expected " + problem);
+        }
+        return missing.size();
+    }
+
+    private List<String> missingMeters() {
+        List<String> missing = new ArrayList<>();
+        // One enforcement per request that reached a handler: the 200s, 201s and 204s are permitted, the
+        // 403s of the PDP denied, the anonymous call unauthenticated. The PEP's own token is rejected
+        // before, by Spring Security
+        expectCount(missing, 7, MicrometerPepListener.ENFORCEMENTS, "outcome", "permitted");
+        expectCount(missing, 6, MicrometerPepListener.ENFORCEMENTS, "outcome", "denied");
+        expectCount(missing, 1, MicrometerPepListener.ENFORCEMENTS, "outcome", "unauthenticated");
+        // A call to the PDP for every enforcement with a subject, and an Access Evaluations request for
+        // each of the two lists and the three bulk deletes
+        expectCount(missing, 7, MicrometerPepListener.CALLS, "operation", "evaluation", "outcome", "permit");
+        expectCount(missing, 6, MicrometerPepListener.CALLS, "operation", "evaluation", "outcome", "deny");
+        expectCount(missing, 5, MicrometerPepListener.CALLS, "operation", "evaluations", "outcome", "completed");
+        expectSome(missing, MicrometerPepListener.ATTEMPTS);
+        expectSome(missing, AuthZenClientMetrics.LISTENER_DROPPED);
+        expectSome(missing, EnforcerMetrics.LISTENER_DROPPED);
+        return missing;
+    }
+
+    private void expectCount(List<String> missing, long expected, String name, String... tags) {
+        long actual = registry.find(name).tags(tags).meters().stream().mapToLong(DecisionCheck::value).sum();
+        if (actual != expected) {
+            missing.add(expected + " " + name + tagText(tags) + ", got " + actual);
+        }
+    }
+
+    private void expectSome(List<String> missing, String name) {
+        if (registry.find(name).meters().isEmpty()) {
+            missing.add(name);
+        }
+    }
+
+    private static String tagText(String... tags) {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < tags.length; i += 2) {
+            text.append(' ').append(tags[i]).append('=').append(tags[i + 1]);
+        }
+        return text.toString();
+    }
+
+    private static String describe(Meter meter) {
+        StringBuilder text = new StringBuilder(meter.getId().getName());
+        meter.getId().getTags().forEach(tag -> text.append(' ').append(tag.getKey()).append('=').append(tag.getValue()));
+        return text.toString();
+    }
+
+    // The count of a timer or counter
+    private static long value(Meter meter) {
+        return (long) meter.measure().iterator().next().getValue();
     }
 
     private int expect(RestClient api, String description, int expected, String user, HttpMethod method, String path,

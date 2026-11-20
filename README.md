@@ -19,13 +19,12 @@ container with the experimental AuthZEN feature enabled and a realm prepared for
 
 | Example | Shows | Status |
 |---|---|---|
-| [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions | Available |
-| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims, a batch with `deny_on_first_deny` | Available |
+| [`plain-java`](plain-java) | Metadata discovery, single and batch evaluations, a credential provider, fail-closed decisions, the circuit breaker, metrics with Micrometer | Available |
+| [`spring-boot-mvc`](spring-boot-mvc) | `@CheckPermission` in Spring MVC with Spring Security: inferred actions and resources, explicit values, context from claims, a batch with `deny_on_first_deny`, metrics and health with Actuator | Available |
 | [`spring-boot-webflux`](spring-boot-webflux) | The same application on Spring WebFlux: reactive enforcement, the reactive OAuth 2.0 client, asynchronous batches | Available |
-| `micrometer` | Decision and PDP call metrics with Micrometer | Planned |
-| `opentelemetry` | Tracing and `traceparent` propagation with OpenTelemetry | Planned |
 
-A Quarkus example will follow when that integration is released.
+Tracing with OpenTelemetry, and the `traceparent` header sent to the PDP, will be added to these
+examples. A Quarkus example will follow when that integration is released.
 
 ## Requirements
 

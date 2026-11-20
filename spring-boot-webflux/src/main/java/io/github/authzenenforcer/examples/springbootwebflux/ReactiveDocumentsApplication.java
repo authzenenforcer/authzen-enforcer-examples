@@ -3,8 +3,12 @@ package io.github.authzenenforcer.examples.springbootwebflux;
 import io.netty.channel.ChannelOption;
 
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.actuate.autoconfigure.web.server.ManagementPortType;
+import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -20,7 +24,10 @@ import org.springframework.security.web.server.util.matcher.ServerWebExchangeMat
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.Optional;
 
 /**
  * The backend of the document portal: a Spring WebFlux application whose endpoints the AuthZEN
@@ -38,7 +45,42 @@ public class ReactiveDocumentsApplication {
             System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
             System.exit(2);
         }
-        SpringApplication.run(ReactiveDocumentsApplication.class, args);
+        SpringApplication application = new SpringApplication(ReactiveDocumentsApplication.class);
+        // Before Netty binds any port: Actuator must stay on this machine
+        application.addListeners((ApplicationListener<ApplicationEnvironmentPreparedEvent>) prepared ->
+                publicActuator(prepared.getEnvironment()).ifPresent(reason -> {
+                    System.err.println(reason);
+                    System.exit(2);
+                }));
+        application.run(args);
+    }
+
+    /**
+     * Tells why Actuator, which shows metrics and health details to anyone who reaches it, would be
+     * reachable from other machines. Sharing the API's port puts it on the API's interfaces, whatever
+     * {@code management.server.address} says; a port of its own needs a loopback address.
+     */
+    static Optional<String> publicActuator(Environment settings) {
+        switch (ManagementPortType.get(settings)) {
+            case SAME:
+                return Optional.of("management.server.port equals server.port, so Actuator would answer on"
+                        + " the API's interfaces; give it a port of its own");
+            case DIFFERENT:
+                String address = settings.getProperty("management.server.address");
+                return loopback(address) ? Optional.empty()
+                        : Optional.of("management.server.address " + address + " is not a loopback address;"
+                                + " use 127.0.0.1, or Actuator is reachable from other machines");
+            default:
+                return Optional.empty();
+        }
+    }
+
+    private static boolean loopback(String address) {
+        try {
+            return address != null && InetAddress.getByName(address).isLoopbackAddress();
+        } catch (UnknownHostException unresolved) {
+            return false;
+        }
     }
 
     /**

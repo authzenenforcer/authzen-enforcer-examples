@@ -4,7 +4,7 @@
 #   spring-boot-webflux/run.sh          start Keycloak and the application, and show a few calls;
 #                                       both keep running
 #   spring-boot-webflux/run.sh check    run the decision check of the application, then stop it;
-#                                       exits with 1 if a status differs from the expected one
+#                                       exits with 1 if a status or a meter differs from the expected one
 #   spring-boot-webflux/run.sh stop     stop the application and Keycloak
 #
 # The secrets of the realm are kept in .env in the repository root, which Git ignores and Docker
@@ -15,6 +15,8 @@
 # Settings, all optional:
 #   KEYCLOAK_PORT  the port of Keycloak, default 8080; kept in .env once given
 #   DEBUG=1        start the application with a debugger port on 127.0.0.1:5005
+#   MANAGEMENT_SERVER_PORT
+#                  the port of Actuator on 127.0.0.1, default 9082
 #
 # Requires Docker with Docker Compose, Java 17 or later, Maven, curl and jq.
 set -eu
@@ -117,6 +119,8 @@ call() {
 }
 
 demo() {
+    # Spring Boot reads MANAGEMENT_SERVER_PORT by itself, also from .env; this is for the hints only
+    actuator=http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-9082}/actuator
     bob=$(token bob)
     echo
     echo "Calls to the application, $APP_URL:"
@@ -132,6 +136,11 @@ demo() {
     echo "    -d client_id=documents-cli -d username=alice --data-urlencode \"password=\$EXAMPLE_USER_PASSWORD\" \\"
     echo "    | jq -r .access_token)"
     echo "  curl -i -H \"Authorization: Bearer \$TOKEN\" $APP_URL/documents"
+    echo
+    echo "Actuator answers on 127.0.0.1 only, on a port of its own:"
+    echo
+    echo "  curl -s $actuator/health/authzen | jq"
+    echo "  curl -s $actuator/metrics/authzen.enforcements | jq"
     echo
     echo "Stop both with: spring-boot-webflux/run.sh stop"
 }

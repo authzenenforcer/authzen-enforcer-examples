@@ -16,20 +16,30 @@ import io.github.authzenenforcer.core.model.EvaluationsSemantic;
 import io.github.authzenenforcer.core.model.PdpMetadata;
 import io.github.authzenenforcer.core.model.Resource;
 import io.github.authzenenforcer.core.model.Subject;
+import io.github.authzenenforcer.micrometer.AuthZenClientMetrics;
+import io.github.authzenenforcer.micrometer.MicrometerPepListener;
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /**
  * Walks through the AuthZEN features that authzen-enforcer supports, against the Keycloak PDP of
  * this repository.
  *
- * <p>Every decision is compared with the one the realm should make. The program exits with status
- * 1 if any of them differs, so that it doubles as a check in CI.
+ * <p>Every decision is compared with the one the realm should make, and the meters the calls
+ * recorded with those they should have recorded. The program exits with status 1 if any of them
+ * differs, so that it doubles as a check in CI.
  */
 public final class PlainJavaExample {
 
@@ -39,12 +49,15 @@ public final class PlainJavaExample {
     private static final Resource HANDBOOK = Resource.of("document", "handbook");
     private static final Resource SALARY_REPORT = Resource.of("document", "salary-report");
     private static final Resource DOCUMENTS = Resource.of("collection", "document");
+    private static final Duration EVENT_WAIT = Duration.ofSeconds(10);
 
     private final AuthZenClient client;
+    private final MeterRegistry registry;
     private int unexpected;
 
-    private PlainJavaExample(AuthZenClient client) {
+    private PlainJavaExample(AuthZenClient client, MeterRegistry registry) {
         this.client = client;
+        this.registry = registry;
     }
 
     public static void main(String[] args) {
@@ -63,14 +76,17 @@ public final class PlainJavaExample {
 
         ClientCredentialsTokens tokens = new ClientCredentialsTokens(URI.create(tokenUrl), clientId, clientSecret);
 
+        // Micrometer keeps the meters in memory here; an application adds the registry of its
+        // monitoring system instead
+        MeterRegistry registry = new SimpleMeterRegistry();
+
         // The PDP URL and the credentials are all the client needs. It finds the endpoints in the
         // metadata the PDP publishes. Create one client per PDP and share it: it is thread-safe.
-        AuthZenClient client = AuthZenClient.builder()
+        AuthZenClient client = measured(registry, "portal", AuthZenClient.builder()
                 .pdpUrl(pdpUrl)
-                .credentials(tokens)
-                .build();
+                .credentials(tokens));
 
-        PlainJavaExample example = new PlainJavaExample(client);
+        PlainJavaExample example = new PlainJavaExample(client, registry);
         example.discovery();
         example.singleDecisions();
         example.resourceProperties();
@@ -80,14 +96,15 @@ public final class PlainJavaExample {
         example.clientSubject(clientId);
         example.asynchronous();
         example.failClosed(pdpUrl, unreachablePdpUrl);
+        example.metrics();
 
         System.out.printf("%nThe provider requested %d token(s) for all of the calls above.%n",
                 tokens.tokenRequests());
         if (example.unexpected > 0) {
-            System.out.printf("%d decision(s) differ from the expected ones.%n", example.unexpected);
+            System.out.printf("%d decision(s) or meter(s) differ from the expected ones.%n", example.unexpected);
             System.exit(1);
         }
-        System.out.println("All decisions are as expected.");
+        System.out.println("All decisions and meters are as expected.");
     }
 
     private void discovery() {
@@ -212,21 +229,134 @@ public final class PlainJavaExample {
         section("Fail-closed: no decision means deny");
 
         // The PDP rejects the PEP's own credential with 401. That is not a decision about alice.
-        AuthZenClient wrongToken = AuthZenClient.builder()
+        AuthZenClient wrongToken = measured(registry, "wrong-token", AuthZenClient.builder()
                 .pdpUrl(pdpUrl)
-                .credentials(CredentialProvider.staticBearer("not-a-valid-token"))
-                .build();
+                .credentials(CredentialProvider.staticBearer("not-a-valid-token")));
         expectNoDecision("alice reads the handbook, but the PDP rejects the PEP's token",
                 wrongToken, PdpAuthenticationException.class);
 
         // An address where no PDP answers; retries are off so that this is quick
-        AuthZenClient unreachable = AuthZenClient.builder()
+        AuthZenClient unreachable = measured(registry, "unreachable", AuthZenClient.builder()
                 .pdpUrl(unreachablePdpUrl)
                 .connectTimeout(Duration.ofSeconds(1))
-                .maxRetries(0)
-                .build();
+                .maxRetries(0));
         expectNoDecision("alice reads the handbook, but the PDP is unreachable",
                 unreachable, PdpCommunicationException.class);
+        expectNoDecision("alice reads the handbook, but the PDP is still unreachable",
+                unreachable, PdpCommunicationException.class);
+        expectNoDecision("alice reads the handbook; the third failure in a row opens the circuit breaker",
+                unreachable, PdpCommunicationException.class);
+        // An open breaker fails calls at once, without contacting the PDP, until a probe after
+        // about five seconds succeeds
+        expectNoDecision("alice reads the handbook while the breaker is open",
+                unreachable, PdpCommunicationException.class);
+    }
+
+    private void metrics() {
+        section("Metrics");
+        // Listeners get the events on a thread of their own, shortly after the calls: wait for them
+        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        List<String> missing = missingMeters();
+        while (!missing.isEmpty() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            missing = missingMeters();
+        }
+
+        Map<String, Long> lines = new TreeMap<>();
+        for (Meter meter : registry.getMeters()) {
+            if (meter.getId().getName().startsWith("authzen.")) {
+                lines.merge(describe(meter), value(meter), Long::sum);
+            }
+        }
+        lines.forEach((meter, value) -> System.out.printf("  %-4d %s%n", value, meter));
+        for (String problem : missing) {
+            System.out.println("  <-- expected " + problem);
+            unexpected++;
+        }
+    }
+
+    /**
+     * The meters that the calls above should have recorded. The numbers of calls and metadata
+     * refreshes are exact: every run makes the same calls. Attempts, breaker transitions and dropped
+     * events only need to be there.
+     */
+    private List<String> missingMeters() {
+        List<String> missing = new ArrayList<>();
+        expectCount(missing, 9, MicrometerPepListener.CALLS,
+                "client", "portal", "operation", "evaluation", "outcome", "permit");
+        expectCount(missing, 7, MicrometerPepListener.CALLS,
+                "client", "portal", "operation", "evaluation", "outcome", "deny");
+        expectCount(missing, 3, MicrometerPepListener.CALLS,
+                "client", "portal", "operation", "evaluations", "outcome", "completed");
+        expectCount(missing, 1, MicrometerPepListener.CALLS,
+                "client", "wrong-token", "operation", "evaluation", "outcome", "failed");
+        expectCount(missing, 4, MicrometerPepListener.CALLS,
+                "client", "unreachable", "operation", "evaluation", "outcome", "failed");
+        // Discovery: once for each client that reaches the PDP, and for the unreachable one until
+        // its breaker opened
+        expectCount(missing, 1, MicrometerPepListener.METADATA_REFRESHES, "client", "portal", "result", "fresh");
+        expectCount(missing, 1, MicrometerPepListener.METADATA_REFRESHES, "client", "wrong-token", "result", "fresh");
+        expectCount(missing, 3, MicrometerPepListener.METADATA_REFRESHES, "client", "unreachable", "result", "failed");
+        for (String name : List.of("portal", "wrong-token", "unreachable")) {
+            expectSome(missing, MicrometerPepListener.ATTEMPTS, "client", name);
+            expectSome(missing, AuthZenClientMetrics.LISTENER_DROPPED, "client", name);
+        }
+        expectSome(missing, MicrometerPepListener.BREAKER_TRANSITIONS,
+                "client", "unreachable", "breaker", "metadata_discovery", "to", "open");
+        return missing;
+    }
+
+    private void expectCount(List<String> missing, long expected, String name, String... tags) {
+        long actual = registry.find(name).tags(tags).meters().stream().mapToLong(PlainJavaExample::value).sum();
+        if (actual != expected) {
+            missing.add(expected + " " + name + tagText(tags) + ", got " + actual);
+        }
+    }
+
+    private void expectSome(List<String> missing, String name, String... tags) {
+        if (registry.find(name).tags(tags).meters().isEmpty()) {
+            missing.add(name + tagText(tags));
+        }
+    }
+
+    private static String tagText(String... tags) {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < tags.length; i += 2) {
+            text.append(' ').append(tags[i]).append('=').append(tags[i + 1]);
+        }
+        return text.toString();
+    }
+
+    // The dropped events of a client in one line instead of one per listener and event type
+    private static String describe(Meter meter) {
+        Meter.Id id = meter.getId();
+        StringBuilder text = new StringBuilder(id.getName());
+        id.getTags().stream()
+                .filter(tag -> !id.getName().equals(AuthZenClientMetrics.LISTENER_DROPPED) || tag.getKey().equals("client"))
+                .forEach(tag -> text.append(' ').append(tag.getKey()).append('=').append(tag.getValue()));
+        return text.toString();
+    }
+
+    // The count of a timer or counter, the value of a gauge
+    private static long value(Meter meter) {
+        return (long) meter.measure().iterator().next().getValue();
+    }
+
+    /**
+     * Builds a client whose events become meters. Every client gets its own listener and tags, so
+     * that the meters of one do not mix with those of another.
+     */
+    private static AuthZenClient measured(MeterRegistry registry, String name, AuthZenClient.Builder builder) {
+        Tags tags = Tags.of("client", name);
+        AuthZenClient client = builder.listener(MicrometerPepListener.builder(registry).tags(tags).build()).build();
+        // Exposes the events the client had to drop because a listener was too slow
+        AuthZenClientMetrics.bind(client, registry, tags);
+        return client;
     }
 
     /**

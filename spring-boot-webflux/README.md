@@ -50,6 +50,12 @@ settings and decision check, with the same results. What differs is listed under
   other token of the realm, such as the one the PEP obtains for the PDP, gets `401`.
 - **Answers.** No token, or a token not issued for this API: `401` with Spring Security's
   challenge. A deny or a PDP failure: `403`.
+- **Metrics and health.** With `authzen-enforcer-micrometer` and Spring Boot Actuator on the
+  classpath, the starter records the meters of the PDP client and of the enforcer by itself; no
+  code is needed. Actuator answers on a port of its own, `9082`, bound to `127.0.0.1`, so neither
+  the metrics nor the health details are reachable through the API. The opt-in `authzen` health
+  indicator shows the state of the client's circuit breakers and of the last metadata refresh,
+  without calling the PDP. See [Metrics and health](#metrics-and-health).
 
 ## Running it
 
@@ -94,6 +100,7 @@ the [main README](../README.md#the-scenario).
 |---|---|
 | `KEYCLOAK_PORT=8180 spring-boot-webflux/run.sh` | Keycloak on another port than `8080`, for example when it is taken; kept in `.env` |
 | `DEBUG=1 spring-boot-webflux/run.sh` | the application with a debugger port on `127.0.0.1:5005`, for your IDE's remote debugging |
+| `MANAGEMENT_SERVER_PORT=9181 spring-boot-webflux/run.sh` | Actuator on another port than `9082`, for example when it is taken |
 
 `documents-cli` is a public client with the password grant, which the realm has for this example
 only. A real client signs users in with the authorization code flow.
@@ -101,8 +108,9 @@ only. A real client signs users in with the authorization code flow.
 ### The decision check
 
 `spring-boot-webflux/run.sh check` runs the application with `--example.check=true`: it calls its own
-endpoints as the users of the realm, prints every status and exits with status 1 if one differs
-from the expected one. CI runs it.
+endpoints as the users of the realm and prints every status. It then checks Actuator and prints the
+meters these calls recorded, and exits with status 1 if a status or a meter differs from the
+expected one. CI runs it.
 
 ```text
 A document
@@ -129,7 +137,20 @@ Several documents at once
   403 alice deletes the release notes and bob's new document
   204 alice deletes the release notes and the salary report
 
-All statuses are as expected.
+Actuator
+  200 the authzen health indicator
+  200 the meter authzen.enforcements
+  404 Actuator on the port of the API
+
+Metrics
+  6   authzen.client.calls exception=none operation=evaluation outcome=deny
+  7   authzen.client.calls exception=none operation=evaluation outcome=permit
+  5   authzen.client.calls exception=none operation=evaluations outcome=completed
+  6   authzen.enforcements outcome=denied
+  7   authzen.enforcements outcome=permitted
+  1   authzen.enforcements outcome=unauthenticated
+
+All statuses and meters are as expected.
 ```
 
 ## Reactive
@@ -153,6 +174,53 @@ All statuses are as expected.
   `MacOSDnsServerAddressStreamProvider`. It falls back to the system's DNS settings; the example
   only calls `127.0.0.1`.
 
+## Metrics and health
+
+The starter configures metrics when `authzen-enforcer-micrometer` is present and there is a
+`MeterRegistry`, which `spring-boot-starter-actuator` provides. While the application runs:
+
+```bash
+curl -s http://127.0.0.1:9082/actuator/metrics | jq '.names[] | select(startswith("authzen"))'
+curl -s 'http://127.0.0.1:9082/actuator/metrics/authzen.enforcements?tag=outcome:denied' | jq
+curl -s http://127.0.0.1:9082/actuator/health/authzen | jq
+```
+
+Without a tag filter, `/actuator/metrics/<name>` adds up the values of every tag combination:
+`authzen.enforcements` alone counts all requests, whatever their outcome. Filter with one or more
+`tag=key:value` parameters, such as `?tag=operation:evaluation&tag=outcome:deny` on
+`authzen.client.calls`; a tag value that no meter has answers `404`.
+
+- `authzen.enforcements` counts the requests the starter handled, by outcome: `permitted`,
+  `denied`, `unauthenticated` (no token, no call to the PDP) and others. `failed_open` would count
+  requests let through without a decision, which deserves an alert; this example never fails open.
+- `authzen.client.calls` counts the calls to the PDP by operation and outcome: one `evaluation` per
+  enforcement with a caller, and the `evaluations` of the handlers that ask the PDP themselves.
+- `authzen.client.attempts`, `authzen.client.breaker.*`, `authzen.client.metadata.refreshes` and
+  the `listener.dropped` counters complete them.
+
+No tag carries a subject, resource or request id, so the number of time series stays bounded.
+
+`/actuator/metrics` shows the current values, for a look at a running application; it keeps no
+history. The meters are kept in memory by Spring Boot's default registry. To collect them over time,
+add the `micrometer-registry-*` module of your monitoring system: depending on the system, its
+registry publishes an endpoint for the system to read or sends the meters itself. Nothing else
+changes.
+
+The `authzen` health indicator is opt-in (`management.health.authzen.enabled`). It reads the state
+of the client without contacting the PDP, and it is `DOWN` while calls deny at once, for example
+while a circuit breaker is open. It counts towards `/actuator/health`, but not towards the liveness
+and readiness groups: an outage of the PDP would take every instance out of service at once, while
+enforcement already denies on its own.
+
+Actuator listens on `127.0.0.1:9082`, a port of its own, so that the metrics and the health details
+stay off the API. Choose another port with `MANAGEMENT_SERVER_PORT` or
+`--management.server.port`. On the port of the API, Spring Boot would serve Actuator on every
+interface of the API and ignore `management.server.address`, so
+[`ReactiveDocumentsApplication`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/ReactiveDocumentsApplication.java)
+refuses to start, with exit status 2, if the two ports are the same or the address is not a
+loopback address. Actuator has no authentication here: every user of this machine can read it. On
+a shared host, protect it, for example with a security filter chain of its own.
+
 ## Configuration
 
 [`application.yaml`](src/main/resources/application.yaml) has defaults that fit the Keycloak of this
@@ -168,6 +236,8 @@ such as `AUTHZEN_PDP_URL`.
 | `server.port` | `8082` | Keycloak uses `8080`, the spring-boot-mvc example `8081` |
 | `authzen.pdp.client-registration-id` | `pdp` | The registration that obtains the PEP's token |
 | `spring.security.oauth2.client.registration.pdp.client-id` | `document-portal` | The PEP's client; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
+| `management.server.port` | `9082` | Actuator, on `127.0.0.1` only |
+| `management.health.authzen.enabled` | `true` | The `authzen` health indicator, off by default in the starter |
 | `example.user-client-id` | `documents-cli` | The client the decision check gets user tokens from; the password comes from `EXAMPLE_USER_PASSWORD` |
 
 ## Not shown
