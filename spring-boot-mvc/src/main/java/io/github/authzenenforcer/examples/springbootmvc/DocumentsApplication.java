@@ -1,8 +1,12 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.actuate.autoconfigure.web.server.ManagementPortType;
+import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.config.Customizer;
@@ -16,6 +20,8 @@ import org.springframework.security.oauth2.core.http.converter.OAuth2AccessToken
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.client.RestClient;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.Duration;
 
 /**
@@ -34,7 +40,46 @@ public class DocumentsApplication {
             System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
             System.exit(2);
         }
-        SpringApplication.run(DocumentsApplication.class, args);
+        SpringApplication application = new SpringApplication(DocumentsApplication.class);
+        // Checked once the settings are known, before any server starts
+        application.addListeners((ApplicationListener<ApplicationEnvironmentPreparedEvent>) event -> {
+            String exposure = actuatorExposure(event.getEnvironment());
+            if (exposure != null) {
+                System.err.println(exposure);
+                System.exit(2);
+            }
+        });
+        application.run(args);
+    }
+
+    /**
+     * Why Actuator would answer beyond this machine, or null if it does not. Actuator shows metrics
+     * and health details without authentication, so it must listen on a loopback address. On the
+     * port of the API, Spring Boot serves it on every interface of the API and ignores
+     * {@code management.server.address}.
+     */
+    static String actuatorExposure(Environment environment) {
+        ManagementPortType type = ManagementPortType.get(environment);
+        if (type == ManagementPortType.SAME) {
+            return "Set management.server.port to another port than server.port; on the same port, Actuator"
+                    + " answers on every interface of the API";
+        }
+        if (type == ManagementPortType.DIFFERENT && !isLoopback(environment.getProperty("management.server.address"))) {
+            return "Set management.server.address to a loopback address such as 127.0.0.1; Actuator shows"
+                    + " metrics and health details without authentication";
+        }
+        return null;
+    }
+
+    private static boolean isLoopback(String address) {
+        if (address == null) {
+            return false;
+        }
+        try {
+            return InetAddress.getByName(address).isLoopbackAddress();
+        } catch (UnknownHostException e) {
+            return false;
+        }
     }
 
     /**

@@ -46,6 +46,26 @@ spring:
           issuer-uri: ${authzen.pdp.url}
           audiences: documents-api
 
+management:
+  server:
+    # Actuator answers on a port of its own, reachable from this machine only, and never on the port
+    # of the API. Choose another one with --management.server.port=... or MANAGEMENT_SERVER_PORT.
+    # ReactiveDocumentsApplication refuses to start if it equals server.port or the address is not a loopback address
+    port: 9082
+    address: 127.0.0.1
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics
+  endpoint:
+    health:
+      # Only on 127.0.0.1; the details name the state of the breakers and the last metadata refresh
+      show-details: always
+  health:
+    authzen:
+      # Opt-in: the state of the client, without a call to the PDP. Not part of liveness or readiness
+      enabled: true
+
 example:
   # The decision check gets user tokens from the public client documents-cli
   token-url: ${authzen.pdp.url}/protocol/openid-connect/token

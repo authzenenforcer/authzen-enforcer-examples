@@ -13,6 +13,7 @@
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <authzen-enforcer.version>0.3.0</authzen-enforcer.version>
+        <micrometer.version>1.18.0</micrometer.version>
         <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
         <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
         <exec-maven-plugin.version>3.7.0</exec-maven-plugin.version>
@@ -36,6 +37,14 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- authzen-enforcer-micrometer uses the Micrometer of the application, 1.10 or newer -->
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-bom</artifactId>
+                <version>${micrometer.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -43,6 +52,14 @@
         <dependency>
             <groupId>io.github.authzenenforcer</groupId>
             <artifactId>authzen-enforcer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.authzenenforcer</groupId>
+            <artifactId>authzen-enforcer-micrometer</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
         </dependency>
     </dependencies>
 

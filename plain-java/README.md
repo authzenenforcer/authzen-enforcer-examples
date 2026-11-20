@@ -1,7 +1,8 @@
 # plain-java
 
-authzen-enforcer in a plain Java application, without a framework. The only dependency is
-`authzen-enforcer-core`, which itself needs nothing but the JDK.
+authzen-enforcer in a plain Java application, without a framework. It needs
+`authzen-enforcer-core`, which itself needs nothing but the JDK, and records metrics with
+`authzen-enforcer-micrometer` and Micrometer.
 
 ## Running it
 
@@ -19,8 +20,9 @@ with the realm imported, override them; see [Configuration](#configuration):
 mvn -q compile exec:java -Dpdp.url=https://keycloak.example.com/realms/authzen-examples
 ```
 
-The program prints every decision it asks for and exits with status 1 if one differs from what the
-realm should decide. You get output similar to this; the request IDs differ on every run:
+The program prints every decision it asks for and the meters these calls recorded, and exits with
+status 1 if a decision differs from what the realm should decide or a meter is missing. You get
+output similar to this; the request IDs and the breaker's waiting time differ on every run:
 
 ```text
 Metadata discovery
@@ -69,12 +71,45 @@ Asynchronous calls
 
 Fail-closed: no decision means deny
   deny   alice reads the handbook, but the PDP rejects the PEP's token
-         PdpAuthenticationException: PDP rejected the credentials of the PEP with HTTP 401 (X-Request-ID 32770c81-23ff-43ad-83ae-5d640554795e)
+         PdpAuthenticationException: PDP rejected the credentials of the PEP with HTTP 401 (X-Request-ID 5039e96f-0afa-49f1-baa7-04a108145049)
   deny   alice reads the handbook, but the PDP is unreachable
-         PdpCommunicationException: PDP request failed (X-Request-ID f15a574b-a43b-48d2-becc-6566a5c21ff3)
+         PdpCommunicationException: PDP request failed (X-Request-ID 90b267d6-13d6-467d-a632-7f9adb27572f)
+  deny   alice reads the handbook, but the PDP is still unreachable
+         PdpCommunicationException: PDP request failed (X-Request-ID 646c2a80-7da9-4052-bcd0-4bad2e6535f4)
+  deny   alice reads the handbook; the third failure in a row opens the circuit breaker
+         PdpCommunicationException: PDP request failed (X-Request-ID 97519243-c081-4cff-ba27-97c6ab2a2d51)
+  deny   alice reads the handbook while the breaker is open
+         PdpCommunicationException: PDP metadata discovery is suspended because the PDP kept failing (next attempt in 3005 ms): PDP request failed (X-Request-ID 97519243-c081-4cff-ba27-97c6ab2a2d51)
+
+Metrics
+  16   authzen.client.attempts client=portal exception=none next=none operation=evaluation status=200
+  3    authzen.client.attempts client=portal exception=none next=none operation=evaluations status=200
+  1    authzen.client.attempts client=portal exception=none next=none operation=metadata status=200
+  3    authzen.client.attempts client=unreachable exception=ConnectException next=none operation=metadata status=none
+  1    authzen.client.attempts client=wrong-token exception=none next=none operation=evaluation status=401
+  1    authzen.client.attempts client=wrong-token exception=none next=none operation=metadata status=200
+  1    authzen.client.attempts client=wrong-token exception=none next=refresh_credential operation=evaluation status=401
+  0    authzen.client.breaker.state breaker=authorization_api client=portal
+  0    authzen.client.breaker.state breaker=authorization_api client=unreachable
+  0    authzen.client.breaker.state breaker=authorization_api client=wrong-token
+  0    authzen.client.breaker.state breaker=metadata_discovery client=portal
+  2    authzen.client.breaker.state breaker=metadata_discovery client=unreachable
+  0    authzen.client.breaker.state breaker=metadata_discovery client=wrong-token
+  1    authzen.client.breaker.transitions breaker=metadata_discovery client=unreachable from=closed to=open
+  7    authzen.client.calls client=portal exception=none operation=evaluation outcome=deny
+  9    authzen.client.calls client=portal exception=none operation=evaluation outcome=permit
+  3    authzen.client.calls client=portal exception=none operation=evaluations outcome=completed
+  4    authzen.client.calls client=unreachable exception=PdpCommunicationException operation=evaluation outcome=failed
+  1    authzen.client.calls client=wrong-token exception=PdpAuthenticationException operation=evaluation outcome=failed
+  0    authzen.client.listener.dropped client=portal
+  0    authzen.client.listener.dropped client=unreachable
+  0    authzen.client.listener.dropped client=wrong-token
+  1    authzen.client.metadata.refreshes client=portal result=fresh
+  3    authzen.client.metadata.refreshes client=unreachable result=failed
+  1    authzen.client.metadata.refreshes client=wrong-token result=fresh
 
 The provider requested 1 token(s) for all of the calls above.
-All decisions are as expected.
+All decisions and meters are as expected.
 ```
 
 ## What it shows
@@ -92,7 +127,8 @@ goes through these steps in order:
 | Several decisions in one call | Access Evaluations with `execute_all`, `deny_on_first_deny` and `permit_on_first_permit`, and the PDP's reason for a deny. |
 | A client as the subject | `{"type": "client", "id": "document-portal"}`: the portal asks for itself. |
 | Asynchronous calls | `evaluateAsync`, with a failure turned into a deny. |
-| Fail-closed | An invalid PEP token (`PdpAuthenticationException`) and an unreachable PDP (`PdpCommunicationException`) both end in a deny. |
+| Fail-closed | An invalid PEP token (`PdpAuthenticationException`) and an unreachable PDP (`PdpCommunicationException`) both end in a deny. After three failures in a row, the circuit breaker opens and the next call fails at once, without contacting the PDP. |
+| Metrics | The meters of `authzen-enforcer-micrometer` for all of the calls above. |
 
 ### Fail-closed in application code
 
@@ -121,6 +157,44 @@ a time, and drops it when the PDP rejects it. At the end, the program prints how
 requested: one for all of the calls.
 
 In a framework application, delegate this to the framework's OAuth client instead.
+
+### Metrics
+
+`authzen-enforcer-micrometer` turns the events of a client into Micrometer meters. Every client
+gets its own `MicrometerPepListener`, and `AuthZenClientMetrics` exposes the events it had to drop:
+
+```java
+Tags tags = Tags.of("client", "portal");
+AuthZenClient client = AuthZenClient.builder()
+        .pdpUrl(pdpUrl)
+        .credentials(tokens)
+        .listener(MicrometerPepListener.builder(registry).tags(tags).build())
+        .build();
+AuthZenClientMetrics.bind(client, registry, tags);
+```
+
+The example has three clients: the portal, one with an invalid token and one for an unreachable
+PDP. They share the registry, so each listener has its own `client` tag; with the same tags, the
+meters of one would mix with those of another. All of them use the same tag keys, which some
+monitoring systems require.
+
+- `authzen.client.calls` counts calls by operation and outcome: `permit` and `deny` for a single
+  decision, `completed` for a batch, `failed` with the exception's class when there was no
+  decision.
+- `authzen.client.attempts` counts the HTTP exchanges with the PDP, discovery included, by status.
+  `next=refresh_credential` shows the retry after the PDP rejected the token.
+- `authzen.client.breaker.transitions` and `authzen.client.breaker.state` show the breaker of the
+  unreachable client opening: `0` closed, `1` half-open, `2` open.
+- `authzen.client.metadata.refreshes` counts discoveries by result.
+- `authzen.client.listener.dropped` counts the events a listener was too slow for. The example
+  sums them per client; the meters themselves are per listener and event type.
+
+No tag carries a subject, resource or request id, so the number of time series stays bounded.
+
+Listeners get the events on a thread of their own, shortly after the calls, so the example waits
+for them before it prints the meters. The meters are kept in memory by a `SimpleMeterRegistry`;
+to send them to your monitoring system, use the registry of its `micrometer-registry-*` module
+instead. Nothing else changes.
 
 ## Configuration
 
