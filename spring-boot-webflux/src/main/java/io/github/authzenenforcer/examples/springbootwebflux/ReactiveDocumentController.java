@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.Context;
@@ -9,6 +8,7 @@ import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.Resource;
 import io.github.authzenenforcer.spring.CheckPermission;
+import io.github.authzenenforcer.spring.reactive.ReactiveAuthZenClient;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -49,10 +49,10 @@ import java.util.stream.IntStream;
 public class ReactiveDocumentController {
 
     private final Documents store;
-    private final AuthZenClient pdp;
+    private final ReactiveAuthZenClient pdp;
     private final SubjectResolver subjectResolver;
 
-    ReactiveDocumentController(Documents store, AuthZenClient pdp, SubjectResolver subjectResolver) {
+    ReactiveDocumentController(Documents store, ReactiveAuthZenClient pdp, SubjectResolver subjectResolver) {
         this.store = store;
         this.pdp = pdp;
         this.subjectResolver = subjectResolver;
@@ -67,8 +67,8 @@ public class ReactiveDocumentController {
      * open. The default semantic, {@code execute_all}, returns a decision for each; the client
      * rejects an answer that lacks one, and that fails the request like any other failure of the PDP.
      *
-     * <p>The request goes out with the client's asynchronous method, so no thread waits for the PDP;
-     * cancelling the response cancels it.
+     * <p>The request goes out with the starter's {@link ReactiveAuthZenClient}, so no thread waits
+     * for the PDP, cancelling the response cancels it, and its span joins the trace of the request.
      *
      * <p>A decision per document needs a PDP that can decide about each of them. This realm knows
      * only the documents it was created with, so a document created later, such as bob's
@@ -87,7 +87,8 @@ public class ReactiveDocumentController {
             // An empty batch would be a single evaluation of its defaults
             return Mono.just(documentIds);
         }
-        return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(readEach(caller, documentIds)))
+        // Deferred, so that a failure to build the request fails the subscription like one of the PDP
+        return Mono.defer(() -> pdp.evaluations(readEach(caller, documentIds)))
                 .map(decisions -> permitted(documentIds, decisions))
                 // Whatever fails, from resolving the subject to the PDP's answer: fail closed rather
                 // than list nothing

@@ -55,6 +55,9 @@ application on WebFlux.
   the metrics nor the health details are reachable through the API. The opt-in `authzen` health
   indicator shows the state of the client's circuit breakers and of the last metadata refresh,
   without calling the PDP. See [Metrics and health](#metrics-and-health).
+- **Tracing.** With `authzen-enforcer-opentelemetry` and Spring Boot's OpenTelemetry starter, every
+  call to the PDP is a span in the trace of its request, and the PDP gets that trace in the
+  `traceparent` header. The spans go to the log here. See [Tracing](#tracing).
 
 ## Running it
 
@@ -107,13 +110,13 @@ only. A real client signs users in with the authorization code flow.
 ### The decision check
 
 `spring-boot-mvc/run.sh check` runs the application with `--example.check=true`: it calls its own
-endpoints as the users of the realm and prints every status. It then checks Actuator and prints the
-meters these calls recorded, and exits with status 1 if a status or a meter differs from the
-expected one. CI runs it.
+endpoints as the users of the realm and prints every status. It then checks Actuator, prints the
+meters these calls recorded and the spans of one request, and exits with status 1 if a status, a
+meter or a span differs from the expected one; the trace id differs on every run. CI runs it.
 
 ```text
 A document
-  200 bob reads the handbook
+  200 bob reads the handbook, in the trace of the caller
   403 erin, who has no role, reads the handbook
   401 an anonymous caller reads the handbook
   200 bob downloads the handbook (explicit values)
@@ -149,7 +152,13 @@ Metrics
   7   authzen.enforcements outcome=permitted
   1   authzen.enforcements outcome=unauthenticated
 
-All statuses and meters are as expected.
+Tracing
+  http get /documents/{id}   SERVER    trace efb6a10503b48ee8163b5c1966b48df0
+  └─ authzen evaluation      INTERNAL  authzen.outcome=permit
+     └─ POST                 CLIENT    http.response.status_code=200
+  18 of 18 calls to the PDP joined the trace of their request
+
+All statuses, meters and spans are as expected.
 ```
 
 ## Metrics and health
@@ -199,6 +208,42 @@ refuses to start, with exit status 2, if the two ports are the same or the addre
 loopback address. Actuator has no authentication here: every user of this machine can read it. On
 a shared host, protect it, for example with a security filter chain of its own.
 
+## Tracing
+
+With `authzen-enforcer-opentelemetry` and Spring Boot's `spring-boot-starter-opentelemetry` on the
+classpath, the starter records the spans of the PDP client by itself, in the trace of the request:
+the span of the request, a span for each call to the PDP under it, and a span for each HTTP
+exchange with the PDP under that. It sends the exchange's trace context to the PDP in the W3C
+`traceparent` header, so a PDP that records traces, such as Keycloak with tracing enabled, adds
+its own spans under the exchange. No code is needed.
+
+No tracing backend runs here.
+[`DocumentsApplication`](src/main/java/io/github/authzenenforcer/examples/springbootmvc/DocumentsApplication.java)
+defines a `LoggingSpanExporter` bean, so every span is written to `app.log` when it ends:
+
+```text
+... LoggingSpanExporter : 'POST' : efb6a10503b48ee8163b5c1966b48df0 9896d546e5185f75 CLIENT [tracer: io.github.authzenenforcer:] {authzen.request_id="9b9a967e-...", http.request.method="POST", http.response.status_code=200, ...}
+... LoggingSpanExporter : 'authzen evaluation' : efb6a10503b48ee8163b5c1966b48df0 c2886a2382368c4b INTERNAL [tracer: io.github.authzenenforcer:] {authzen.action.name="read", authzen.operation="evaluation", authzen.outcome="permit", authzen.resource.type="document"}
+... LoggingSpanExporter : 'http get /documents/{id}' : efb6a10503b48ee8163b5c1966b48df0 f41c014a826f910e SERVER [tracer: org.springframework.boot:4.1.2] {http.url="/documents/handbook", method="GET", status="200", uri="/documents/{id}", ...}
+```
+
+All three spans share the trace id. The `authzen evaluation` span names the operation, the action,
+the type of the resource and the outcome; the spans of authzen-enforcer carry no subject id, no
+resource id and no value of the properties or the context. Spring Boot's span of the request
+carries its path, such as `/documents/handbook`, and so the id of the document. To send the spans to a tracing backend, set
+`management.opentelemetry.tracing.export.otlp.endpoint` and remove the bean, or keep it next to
+the OTLP export while you look at the traces.
+
+`application.yaml` samples every request, so that each one shows up in the log; Spring Boot
+samples 10% by default, and an application under load keeps a part only. It also turns off the
+spans of Spring Security's filters, to keep the traces short, and the OTLP export of the metrics,
+since no collector runs here.
+
+The decision check sends one request with a `traceparent` of its own, as a caller that is already
+part of a trace would, and prints that request's spans. It checks that the call to the PDP joined
+the caller's trace, and that each of the 18 calls to the PDP the check causes, the handlers' own
+included, has the span of its request as its parent instead of starting a trace of its own.
+
 ## Configuration
 
 [`application.yaml`](src/main/resources/application.yaml) has defaults that fit the Keycloak of this
@@ -216,6 +261,7 @@ such as `AUTHZEN_PDP_URL`.
 | `spring.security.oauth2.client.registration.pdp.client-id` | `document-portal` | The PEP's client; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
 | `management.server.port` | `9081` | Actuator, on `127.0.0.1` only |
 | `management.health.authzen.enabled` | `true` | The `authzen` health indicator, off by default in the starter |
+| `management.tracing.sampling.probability` | `1.0` | Every request is traced; Spring Boot's default is `0.1` |
 | `example.user-client-id` | `documents-cli` | The client the decision check gets user tokens from; the password comes from `EXAMPLE_USER_PASSWORD` |
 
 ## Not shown

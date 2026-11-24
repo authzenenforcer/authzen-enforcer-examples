@@ -1,6 +1,5 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.client.AuthZenClient;
 import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.EvaluationItem;
@@ -8,6 +7,7 @@ import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.EvaluationsSemantic;
 import io.github.authzenenforcer.core.model.Resource;
+import io.github.authzenenforcer.spring.reactive.ReactiveAuthZenClient;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -29,13 +29,13 @@ import java.util.Set;
  * Deletes several documents at once: all of them, or none.
  *
  * <p>{@code @CheckPermission} asks the PDP about one resource, so this handler has none and asks
- * itself, with the starter's {@link AuthZenClient}. One Access Evaluations request carries a
+ * itself, with the starter's {@link ReactiveAuthZenClient}. One Access Evaluations request carries a
  * {@code delete} for every document, with {@code deny_on_first_deny}: the PDP stops at the first
  * document the caller may not delete, since the operation would not run anyway. A decision the PDP
  * did not return counts as a deny, so {@code allPermitted()} is true only if every document was
  * permitted. The subject comes from the starter's {@link SubjectResolver}, the same one that
- * {@code @CheckPermission} uses. The request goes out with the client's asynchronous method, so no
- * thread waits for the PDP.
+ * {@code @CheckPermission} uses. No thread waits for the PDP, and the span of the request to the
+ * PDP joins the trace of the request.
  */
 @RestController
 public class ReactiveBulkDeleteController {
@@ -44,10 +44,10 @@ public class ReactiveBulkDeleteController {
     private static final int BATCH_LIMIT = 10;
 
     private final Documents store;
-    private final AuthZenClient pdp;
+    private final ReactiveAuthZenClient pdp;
     private final SubjectResolver subjectResolver;
 
-    ReactiveBulkDeleteController(Documents store, AuthZenClient pdp, SubjectResolver subjectResolver) {
+    ReactiveBulkDeleteController(Documents store, ReactiveAuthZenClient pdp, SubjectResolver subjectResolver) {
         this.store = store;
         this.pdp = pdp;
         this.subjectResolver = subjectResolver;
@@ -78,7 +78,8 @@ public class ReactiveBulkDeleteController {
     }
 
     private Mono<Boolean> allDeletable(Jwt caller, Set<String> documentIds) {
-        return Mono.fromCompletionStage(() -> pdp.evaluationsAsync(deleteEach(caller, documentIds)))
+        // Deferred, so that a failure to build the request fails the subscription like one of the PDP
+        return Mono.defer(() -> pdp.evaluations(deleteEach(caller, documentIds)))
                 .map(EvaluationsResponse::allPermitted)
                 // Whatever fails, from resolving the subject to the PDP's answer: fail closed
                 .onErrorReturn(false);

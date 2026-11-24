@@ -5,6 +5,7 @@ import io.github.authzenenforcer.core.PdpAuthenticationException;
 import io.github.authzenenforcer.core.PdpCommunicationException;
 import io.github.authzenenforcer.core.auth.CredentialProvider;
 import io.github.authzenenforcer.core.client.AuthZenClient;
+import io.github.authzenenforcer.core.event.AttemptCompleted;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.Context;
 import io.github.authzenenforcer.core.model.EvaluationItem;
@@ -16,12 +17,23 @@ import io.github.authzenenforcer.core.model.EvaluationsSemantic;
 import io.github.authzenenforcer.core.model.PdpMetadata;
 import io.github.authzenenforcer.core.model.Resource;
 import io.github.authzenenforcer.core.model.Subject;
+import io.github.authzenenforcer.core.spi.PepListener;
 import io.github.authzenenforcer.micrometer.AuthZenClientMetrics;
 import io.github.authzenenforcer.micrometer.MicrometerPepListener;
+import io.github.authzenenforcer.opentelemetry.OpenTelemetryTracing;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -32,14 +44,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 
 /**
  * Walks through the AuthZEN features that authzen-enforcer supports, against the Keycloak PDP of
  * this repository.
  *
- * <p>Every decision is compared with the one the realm should make, and the meters the calls
- * recorded with those they should have recorded. The program exits with status 1 if any of them
- * differs, so that it doubles as a check in CI.
+ * <p>Every decision is compared with the one the realm should make, and the meters and spans the
+ * calls recorded with those they should have recorded. The program exits with status 1 if any of
+ * them differs, so that it doubles as a check in CI.
  */
 public final class PlainJavaExample {
 
@@ -51,13 +65,27 @@ public final class PlainJavaExample {
     private static final Resource DOCUMENTS = Resource.of("collection", "document");
     private static final Duration EVENT_WAIT = Duration.ofSeconds(10);
 
+    // The calls of the portal client: 16 single decisions, 3 batches and the one under the
+    // application's span in the tracing section
+    private static final int PORTAL_CALLS = 20;
+    private static final AttributeKey<String> REQUEST_ID = AttributeKey.stringKey("authzen.request_id");
+    private static final AttributeKey<String> OUTCOME = AttributeKey.stringKey("authzen.outcome");
+    private static final AttributeKey<Long> STATUS_CODE = AttributeKey.longKey("http.response.status_code");
+
     private final AuthZenClient client;
     private final MeterRegistry registry;
+    private final Tracer tracer;
+    private final RecordedSpans spans;
+    private final Map<String, String> traceparents;
     private int unexpected;
 
-    private PlainJavaExample(AuthZenClient client, MeterRegistry registry) {
+    private PlainJavaExample(AuthZenClient client, MeterRegistry registry, Tracer tracer, RecordedSpans spans,
+                             Map<String, String> traceparents) {
         this.client = client;
         this.registry = registry;
+        this.tracer = tracer;
+        this.spans = spans;
+        this.traceparents = traceparents;
     }
 
     public static void main(String[] args) {
@@ -80,13 +108,35 @@ public final class PlainJavaExample {
         // monitoring system instead
         MeterRegistry registry = new SimpleMeterRegistry();
 
+        // The OpenTelemetry SDK keeps the spans in memory here, to show them; an application
+        // exports them to its tracing backend instead
+        RecordedSpans spans = new RecordedSpans();
+        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+                .addSpanProcessor(SimpleSpanProcessor.create(spans))
+                .build();
+        OpenTelemetrySdk openTelemetry = OpenTelemetrySdk.builder().setTracerProvider(tracerProvider).build();
+
+        // The trace context the client sends to the PDP with each exchange, by request id
+        Map<String, String> traceparents = new ConcurrentHashMap<>();
+        PepListener traceparentRecorder = new PepListener() {
+            @Override
+            public void onAttemptCompleted(AttemptCompleted event) {
+                event.getExchangeSpan().ifPresent(span ->
+                        traceparents.put(event.getRequestId(), span.getTraceContext().getTraceparent()));
+            }
+        };
+
         // The PDP URL and the credentials are all the client needs. It finds the endpoints in the
         // metadata the PDP publishes. Create one client per PDP and share it: it is thread-safe.
+        // The tracer records every call as a span and sends its trace context to the PDP.
         AuthZenClient client = measured(registry, "portal", AuthZenClient.builder()
                 .pdpUrl(pdpUrl)
-                .credentials(tokens));
+                .credentials(tokens)
+                .tracer(OpenTelemetryTracing.builder(openTelemetry).build())
+                .listener(traceparentRecorder));
 
-        PlainJavaExample example = new PlainJavaExample(client, registry);
+        PlainJavaExample example = new PlainJavaExample(client, registry,
+                openTelemetry.getTracer(PlainJavaExample.class.getName()), spans, traceparents);
         example.discovery();
         example.singleDecisions();
         example.resourceProperties();
@@ -95,16 +145,19 @@ public final class PlainJavaExample {
         example.batch();
         example.clientSubject(clientId);
         example.asynchronous();
+        example.tracing();
         example.failClosed(pdpUrl, unreachablePdpUrl);
         example.metrics();
+        openTelemetry.close();
 
         System.out.printf("%nThe provider requested %d token(s) for all of the calls above.%n",
                 tokens.tokenRequests());
         if (example.unexpected > 0) {
-            System.out.printf("%d decision(s) or meter(s) differ from the expected ones.%n", example.unexpected);
+            System.out.printf("%d decision(s), meter(s) or span(s) differ from the expected ones.%n",
+                    example.unexpected);
             System.exit(1);
         }
-        System.out.println("All decisions and meters are as expected.");
+        System.out.println("All decisions, meters and spans are as expected.");
     }
 
     private void discovery() {
@@ -225,6 +278,77 @@ public final class PlainJavaExample {
         report("carol reads the handbook (evaluateAsync)", true, permitted);
     }
 
+    private void tracing() {
+        section("Tracing");
+        // A span of the application, such as the one of an incoming request. The call starts on
+        // the thread where it is current, so the call's span becomes its child.
+        Span request = tracer.spanBuilder("handle request").startSpan();
+        boolean permitted;
+        try (Scope ignored = request.makeCurrent()) {
+            permitted = isPermitted(client, EvaluationRequest.of(user("carol"), Action.of("read"), HANDBOOK));
+        } finally {
+            request.end();
+        }
+        report("carol reads the handbook, inside a span of the application", true, permitted);
+
+        // The tracer ends the spans from the client's events, shortly after the calls: wait for
+        // all of them
+        SpanContext parent = request.getSpanContext();
+        await(() -> callSpans().size() >= PORTAL_CALLS && childOf(parent, "authzen evaluation")
+                .flatMap(call -> childOf(call.getSpanContext(), "POST"))
+                .map(exchange -> traceparents.containsKey(exchange.getAttributes().get(REQUEST_ID)))
+                .orElse(false));
+
+        Optional<SpanData> call = childOf(parent, "authzen evaluation");
+        Optional<SpanData> exchange = call.flatMap(c -> childOf(c.getSpanContext(), "POST"));
+        System.out.printf("  %-26s trace %s%n", "handle request", parent.getTraceId());
+        call.ifPresent(c -> System.out.printf("  └─ %-23s %-9s authzen.outcome=%s%n",
+                c.getName(), c.getKind(), c.getAttributes().get(OUTCOME)));
+        exchange.ifPresent(e -> System.out.printf("     └─ %-20s %-9s http.response.status_code=%s%n",
+                e.getName(), e.getKind(), e.getAttributes().get(STATUS_CODE)));
+        String traceparent = exchange.map(e -> traceparents.get(e.getAttributes().get(REQUEST_ID))).orElse(null);
+        System.out.println("  traceparent sent to the PDP: " + traceparent);
+
+        // The PDP gets the trace of the application, with the exchange's span as its parent
+        boolean joined = exchange.isPresent() && traceparent != null
+                && traceparent.startsWith("00-" + parent.getTraceId() + "-" + exchange.get().getSpanId() + "-");
+        report("the call to the PDP joined the trace of the application", true, joined);
+
+        List<SpanData> calls = callSpans();
+        long exchanges = spans.all().stream().filter(span -> span.getName().equals("POST")).count();
+        System.out.printf("  %d call spans and %d exchange spans recorded for the portal client%n",
+                calls.size(), exchanges);
+        if (calls.size() != PORTAL_CALLS || exchanges < PORTAL_CALLS) {
+            System.out.printf("  <-- expected %d call spans, each with at least one exchange span%n", PORTAL_CALLS);
+            unexpected++;
+        }
+    }
+
+    private List<SpanData> callSpans() {
+        return spans.all().stream().filter(span -> span.getName().startsWith("authzen ")).toList();
+    }
+
+    private Optional<SpanData> childOf(SpanContext parent, String name) {
+        return spans.all().stream()
+                .filter(span -> span.getName().equals(name))
+                .filter(span -> span.getParentSpanId().equals(parent.getSpanId())
+                        && span.getTraceId().equals(parent.getTraceId()))
+                .findFirst();
+    }
+
+    /** Waits until the condition holds, at most {@link #EVENT_WAIT}. */
+    private static void await(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     private void failClosed(String pdpUrl, String unreachablePdpUrl) {
         section("Fail-closed: no decision means deny");
 
@@ -255,17 +379,8 @@ public final class PlainJavaExample {
     private void metrics() {
         section("Metrics");
         // Listeners get the events on a thread of their own, shortly after the calls: wait for them
-        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        await(() -> missingMeters().isEmpty());
         List<String> missing = missingMeters();
-        while (!missing.isEmpty() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-            missing = missingMeters();
-        }
 
         Map<String, Long> lines = new TreeMap<>();
         for (Meter meter : registry.getMeters()) {
@@ -287,7 +402,7 @@ public final class PlainJavaExample {
      */
     private List<String> missingMeters() {
         List<String> missing = new ArrayList<>();
-        expectCount(missing, 9, MicrometerPepListener.CALLS,
+        expectCount(missing, 10, MicrometerPepListener.CALLS,
                 "client", "portal", "operation", "evaluation", "outcome", "permit");
         expectCount(missing, 7, MicrometerPepListener.CALLS,
                 "client", "portal", "operation", "evaluation", "outcome", "deny");
