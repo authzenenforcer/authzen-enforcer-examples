@@ -5,6 +5,12 @@ import io.github.authzenenforcer.micrometer.EnforcerMetrics;
 import io.github.authzenenforcer.micrometer.MicrometerPepListener;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.sdk.common.CompletableResultCode;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -19,17 +25,26 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 /**
  * Calls the application's own endpoints as the users of the realm once it has started, prints the
- * status of every call, and exits: with status 1 if a status differs from the expected one, so that
- * it doubles as a check in CI. Runs only with {@code --example.check=true}.
+ * status of every call, and exits: with status 1 if a status, a meter or a span differs from the
+ * expected one, so that it doubles as a check in CI. Runs only with {@code --example.check=true}.
  *
  * <p>The users sign in with the password grant of the public client {@code documents-cli}, which
  * the realm has for this check only. A real client would use the authorization code flow.
@@ -40,21 +55,31 @@ class DecisionCheck implements ApplicationRunner {
 
     // Listeners get the events on a thread of their own, shortly after the calls
     private static final Duration EVENT_WAIT = Duration.ofSeconds(10);
+    // A call to the PDP for each of the 13 enforcements with a subject, and 5 Access Evaluations requests
+    private static final int PDP_CALLS = 18;
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final AttributeKey<String> OUTCOME = AttributeKey.stringKey("authzen.outcome");
+    private static final AttributeKey<Long> STATUS_CODE = AttributeKey.longKey("http.response.status_code");
 
     private final ConfigurableApplicationContext context;
     private final Environment environment;
     private final MeterRegistry registry;
+    private final SdkTracerProvider tracerProvider;
+    private final RecordedSpans spans;
     private final RestClient tokens;
     private final String userClientId;
     private final String clientId;
     private final Map<String, String> userTokens = new HashMap<>();
 
     DecisionCheck(ConfigurableApplicationContext context, Environment environment, MeterRegistry registry,
+            SdkTracerProvider tracerProvider, RecordedSpans spans,
             @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId,
             @Value("${spring.security.oauth2.client.registration.pdp.client-id}") String clientId) {
         this.context = context;
         this.environment = environment;
         this.registry = registry;
+        this.tracerProvider = tracerProvider;
+        this.spans = spans;
         this.tokens = RestClient.create(tokenUrl);
         this.userClientId = userClientId;
         this.clientId = clientId;
@@ -73,7 +98,11 @@ class DecisionCheck implements ApplicationRunner {
         int unexpected = 0;
         System.out.println();
         System.out.println("A document");
-        unexpected += expect(api, "bob reads the handbook", 200, "bob", HttpMethod.GET, "/documents/handbook", password);
+        // The caller sends its own trace context, as a service that is traced itself would
+        String traceId = HexFormat.of().formatHex(randomBytes(16));
+        String traceparent = "00-" + traceId + "-" + HexFormat.of().formatHex(randomBytes(8)) + "-01";
+        unexpected += expect(api.method(HttpMethod.GET).uri("/documents/handbook").header("traceparent", traceparent),
+                "bob reads the handbook, in the trace of the caller", 200, "bob", password);
         unexpected += expect(api, "erin, who has no role, reads the handbook", 403, "erin", HttpMethod.GET,
                 "/documents/handbook", password);
         unexpected += expect(api, "an anonymous caller reads the handbook", 401, null, HttpMethod.GET,
@@ -125,12 +154,15 @@ class DecisionCheck implements ApplicationRunner {
         System.out.println("Metrics");
         unexpected += expectMeters();
         System.out.println();
+        System.out.println("Tracing");
+        unexpected += expectSpans(traceId);
+        System.out.println();
         if (unexpected > 0) {
-            System.out.printf("%d status(es) or meter(s) differ from the expected ones.%n", unexpected);
+            System.out.printf("%d status(es), meter(s) or span(s) differ from the expected ones.%n", unexpected);
             exit(1);
             return;
         }
-        System.out.println("All statuses and meters are as expected.");
+        System.out.println("All statuses, meters and spans are as expected.");
         exit(0);
     }
 
@@ -140,17 +172,8 @@ class DecisionCheck implements ApplicationRunner {
      * Attempts and dropped events only need to be there.
      */
     private int expectMeters() {
-        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        await(() -> missingMeters().isEmpty());
         List<String> missing = missingMeters();
-        while (!missing.isEmpty() && System.nanoTime() < deadline) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-            missing = missingMeters();
-        }
         Map<String, Long> lines = new TreeMap<>();
         for (Meter meter : registry.getMeters()) {
             String name = meter.getId().getName();
@@ -182,6 +205,88 @@ class DecisionCheck implements ApplicationRunner {
         expectSome(missing, AuthZenClientMetrics.LISTENER_DROPPED);
         expectSome(missing, EnforcerMetrics.LISTENER_DROPPED);
         return missing;
+    }
+
+    /**
+     * Prints the spans of the request that came with the caller's trace context, and checks that the
+     * call to the PDP joined it, as every other call joined the trace of its own request.
+     */
+    private int expectSpans(String traceId) {
+        // The tracer ends the spans from the client's events, and Spring Boot exports them in batches
+        await(() -> {
+            tracerProvider.forceFlush().join(1, TimeUnit.SECONDS);
+            return callSpans().size() >= PDP_CALLS && exchangeOfRequest(traceId).isPresent();
+        });
+        Optional<SpanData> request = requestSpan(traceId);
+        Optional<SpanData> call = request.flatMap(r -> child(r, "authzen evaluation"));
+        Optional<SpanData> exchange = call.flatMap(c -> child(c, "POST"));
+        request.ifPresent(r -> System.out.printf("  %-26s %-9s trace %s%n", r.getName(), r.getKind(), r.getTraceId()));
+        call.ifPresent(c -> System.out.printf("  └─ %-23s %-9s authzen.outcome=%s%n", c.getName(), c.getKind(),
+                c.getAttributes().get(OUTCOME)));
+        exchange.ifPresent(e -> System.out.printf("     └─ %-20s %-9s http.response.status_code=%s%n", e.getName(),
+                e.getKind(), e.getAttributes().get(STATUS_CODE)));
+        int problems = 0;
+        if (exchange.isEmpty()) {
+            System.out.println("  <-- expected the request's span in the trace " + traceId
+                    + ", with the call to the PDP and its exchange under it");
+            problems++;
+        }
+
+        // Every call to the PDP belongs to the trace of a request, none starts a trace of its own
+        Set<String> requestTraces = spans.all().stream()
+                .filter(span -> span.getKind() == SpanKind.SERVER)
+                .map(SpanData::getTraceId)
+                .collect(Collectors.toSet());
+        List<SpanData> calls = callSpans();
+        long joined = calls.stream()
+                .filter(span -> span.getParentSpanContext().isValid() && requestTraces.contains(span.getTraceId()))
+                .count();
+        System.out.printf("  %d of %d calls to the PDP joined the trace of their request%n", joined, calls.size());
+        if (calls.size() != PDP_CALLS || joined != calls.size()) {
+            System.out.printf("  <-- expected all %d to join it%n", PDP_CALLS);
+            problems++;
+        }
+        return problems;
+    }
+
+    private Optional<SpanData> exchangeOfRequest(String traceId) {
+        return requestSpan(traceId).flatMap(r -> child(r, "authzen evaluation")).flatMap(c -> child(c, "POST"));
+    }
+
+    private Optional<SpanData> requestSpan(String traceId) {
+        return spans.all().stream()
+                .filter(span -> span.getTraceId().equals(traceId) && span.getKind() == SpanKind.SERVER)
+                .findFirst();
+    }
+
+    private Optional<SpanData> child(SpanData parent, String name) {
+        return spans.all().stream()
+                .filter(span -> span.getName().equals(name) && span.getTraceId().equals(parent.getTraceId())
+                        && span.getParentSpanId().equals(parent.getSpanId()))
+                .findFirst();
+    }
+
+    private List<SpanData> callSpans() {
+        return spans.all().stream().filter(span -> span.getName().startsWith("authzen ")).toList();
+    }
+
+    private static byte[] randomBytes(int length) {
+        byte[] bytes = new byte[length];
+        RANDOM.nextBytes(bytes);
+        return bytes;
+    }
+
+    /** Waits until the condition holds, at most {@link #EVENT_WAIT}. */
+    private static void await(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + EVENT_WAIT.toNanos();
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     private void expectCount(List<String> missing, long expected, String name, String... tags) {
@@ -299,5 +404,36 @@ class DecisionCheck implements ApplicationRunner {
 
     private void exit(int status) {
         System.exit(SpringApplication.exit(context, () -> status));
+    }
+
+    /**
+     * Keeps the spans that ended in memory for the check, besides the log. Spring Boot sends the spans
+     * to every exporter bean.
+     */
+    @Component
+    @ConditionalOnProperty(name = "example.check", havingValue = "true")
+    static final class RecordedSpans implements SpanExporter {
+
+        private final List<SpanData> ended = new CopyOnWriteArrayList<>();
+
+        @Override
+        public CompletableResultCode export(Collection<SpanData> batch) {
+            ended.addAll(batch);
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode flush() {
+            return CompletableResultCode.ofSuccess();
+        }
+
+        @Override
+        public CompletableResultCode shutdown() {
+            return CompletableResultCode.ofSuccess();
+        }
+
+        List<SpanData> all() {
+            return List.copyOf(ended);
+        }
     }
 }

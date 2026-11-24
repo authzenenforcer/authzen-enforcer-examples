@@ -1,6 +1,8 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
 import io.netty.channel.ChannelOption;
+import io.opentelemetry.exporter.logging.LoggingSpanExporter;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.actuate.autoconfigure.web.server.ManagementPortType;
@@ -81,6 +83,16 @@ public class ReactiveDocumentsApplication {
         } catch (UnknownHostException unresolved) {
             return false;
         }
+    }
+
+    /**
+     * Writes every span to the log when it ends, so that the traces need no backend here. Spring Boot
+     * sends the spans to all exporter beans; an application exports them to its tracing backend
+     * instead, for example with management.opentelemetry.tracing.export.otlp.endpoint.
+     */
+    @Bean
+    SpanExporter loggingSpanExporter() {
+        return LoggingSpanExporter.create();
     }
 
     /**

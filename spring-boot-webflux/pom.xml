@@ -65,6 +65,21 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Tracing: with Spring Boot's OpenTelemetry support, the starter records the spans of
+             authzen-enforcer-opentelemetry by itself, in the trace of the request -->
+        <dependency>
+            <groupId>io.github.authzenenforcer</groupId>
+            <artifactId>authzen-enforcer-opentelemetry</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
+        <!-- Writes the spans to the log, so that no tracing backend is needed -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-logging</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

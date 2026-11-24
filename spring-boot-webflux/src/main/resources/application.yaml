@@ -65,6 +65,21 @@ management:
     authzen:
       # Opt-in: the state of the client, without a call to the PDP. Not part of liveness or readiness
       enabled: true
+  tracing:
+    sampling:
+      # Every request, so that each one shows up in the log. Spring Boot samples 10% by default, and an
+      # application under load keeps a part only
+      probability: 1.0
+  observations:
+    enable:
+      # Spring Security records a span for every filter as well; off to keep the traces short
+      spring.security: false
+  otlp:
+    metrics:
+      export:
+        # No OTLP collector runs here: the metrics stay in Actuator. The spans go to the log; to send
+        # them to a collector instead, set management.opentelemetry.tracing.export.otlp.endpoint
+        enabled: false
 
 example:
   # The decision check gets user tokens from the public client documents-cli
