@@ -9,7 +9,7 @@ here. This example mirrors [spring-boot-mvc](../spring-boot-mvc): the same endpo
 settings and decision check, with the same results. What differs is listed under
 [Reactive](#reactive).
 
-> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.3.1.
+> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.4.0.
 
 ## What it shows
 
