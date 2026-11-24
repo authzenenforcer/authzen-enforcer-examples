@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 # Maven Central sometimes answers 429 or a short-lived 404 for a file it has. .mvn/maven.config
-# makes Maven retry 429 and 503, and Maven runs through mvn-retry.sh, which tries again with -U
-# when a download failed
+# makes Maven retry 429 and 503, and Maven runs through mvn-retry.sh, which tries again when a
+# download failed: with -U after a 404, and after a longer wait when the 429s did not stop
 
 jobs:
   pdp:
