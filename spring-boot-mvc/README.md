@@ -8,7 +8,7 @@ Spring Boot offers two web stacks: Spring MVC on servlets, used here, and the re
 WebFlux. The starter supports both; [spring-boot-webflux](../spring-boot-webflux) is the same
 application on WebFlux.
 
-> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.3.1.
+> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.4.0.
 
 ## What it shows
 
