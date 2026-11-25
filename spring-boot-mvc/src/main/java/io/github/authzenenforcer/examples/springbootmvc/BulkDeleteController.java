@@ -1,19 +1,19 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
 import io.github.authzenenforcer.core.client.AuthZenClient;
-import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.EvaluationItem;
 import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsSemantic;
 import io.github.authzenenforcer.core.model.Resource;
 import io.github.authzenenforcer.core.model.Subject;
+import io.github.authzenenforcer.spring.CallerSubjects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -32,8 +32,8 @@ import java.util.Set;
  * {@code delete} for every document, with {@code deny_on_first_deny}: the PDP stops at the first
  * document the caller may not delete, since the operation would not run anyway. A decision the PDP
  * did not return counts as a deny, so {@code allPermitted()} is true only if every document was
- * permitted. The subject comes from the starter's {@link SubjectResolver}, the same one that
- * {@code @CheckPermission} uses.
+ * permitted. The subject comes from the starter's {@link CallerSubjects}, which infers it as
+ * {@code @CheckPermission} does.
  */
 @RestController
 public class BulkDeleteController {
@@ -43,9 +43,9 @@ public class BulkDeleteController {
 
     private final Documents documents;
     private final AuthZenClient client;
-    private final SubjectResolver subjects;
+    private final CallerSubjects subjects;
 
-    BulkDeleteController(Documents documents, AuthZenClient client, SubjectResolver subjects) {
+    BulkDeleteController(Documents documents, AuthZenClient client, CallerSubjects subjects) {
         this.documents = documents;
         this.client = client;
         this.subjects = subjects;
@@ -58,8 +58,8 @@ public class BulkDeleteController {
      */
     @PostMapping("/documents/bulk-delete")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void bulkDelete(@AuthenticationPrincipal Jwt caller, @RequestBody List<String> ids) {
-        if (caller == null) {
+    public void bulkDelete(Authentication caller, @RequestBody List<String> ids) {
+        if (!(caller instanceof JwtAuthenticationToken)) {
             // Spring Security's entry point answers with 401
             throw new AuthenticationCredentialsNotFoundException("No access token");
         }
@@ -74,9 +74,9 @@ public class BulkDeleteController {
         documents.deleteAll(unique);
     }
 
-    private boolean permitted(Jwt caller, Set<String> ids) {
+    private boolean permitted(Authentication caller, Set<String> ids) {
         try {
-            Subject subject = subjects.resolve(caller.getClaims());
+            Subject subject = subjects.of(caller).orElseThrow(() -> new AccessDeniedException("No subject"));
             EvaluationsRequest.Builder request = EvaluationsRequest.builder()
                     .subject(subject)
                     .action(Action.of("delete"))

@@ -1,19 +1,19 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.EvaluationItem;
 import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.EvaluationsSemantic;
 import io.github.authzenenforcer.core.model.Resource;
+import io.github.authzenenforcer.spring.CallerSubjects;
 import io.github.authzenenforcer.spring.reactive.ReactiveAuthZenClient;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -33,8 +33,8 @@ import java.util.Set;
  * {@code delete} for every document, with {@code deny_on_first_deny}: the PDP stops at the first
  * document the caller may not delete, since the operation would not run anyway. A decision the PDP
  * did not return counts as a deny, so {@code allPermitted()} is true only if every document was
- * permitted. The subject comes from the starter's {@link SubjectResolver}, the same one that
- * {@code @CheckPermission} uses. No thread waits for the PDP, and the span of the request to the
+ * permitted. The subject comes from the starter's {@link CallerSubjects}, which infers it as
+ * {@code @CheckPermission} does. No thread waits for the PDP, and the span of the request to the
  * PDP joins the trace of the request.
  */
 @RestController
@@ -45,12 +45,12 @@ public class ReactiveBulkDeleteController {
 
     private final Documents store;
     private final ReactiveAuthZenClient pdp;
-    private final SubjectResolver subjectResolver;
+    private final CallerSubjects callerSubjects;
 
-    ReactiveBulkDeleteController(Documents store, ReactiveAuthZenClient pdp, SubjectResolver subjectResolver) {
+    ReactiveBulkDeleteController(Documents store, ReactiveAuthZenClient pdp, CallerSubjects callerSubjects) {
         this.store = store;
         this.pdp = pdp;
-        this.subjectResolver = subjectResolver;
+        this.callerSubjects = callerSubjects;
     }
 
     /**
@@ -60,8 +60,8 @@ public class ReactiveBulkDeleteController {
      */
     @PostMapping("/documents/bulk-delete")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public Mono<Void> deleteDocuments(@AuthenticationPrincipal Jwt caller, @RequestBody Mono<List<String>> body) {
-        if (caller == null) {
+    public Mono<Void> deleteDocuments(Authentication caller, @RequestBody Mono<List<String>> body) {
+        if (!(caller instanceof JwtAuthenticationToken)) {
             // Spring Security's entry point answers with 401
             return Mono.error(new AuthenticationCredentialsNotFoundException("No access token"));
         }
@@ -77,7 +77,7 @@ public class ReactiveBulkDeleteController {
                 .then();
     }
 
-    private Mono<Boolean> allDeletable(Jwt caller, Set<String> documentIds) {
+    private Mono<Boolean> allDeletable(Authentication caller, Set<String> documentIds) {
         // Deferred, so that a failure to build the request fails the subscription like one of the PDP
         return Mono.defer(() -> pdp.evaluations(deleteEach(caller, documentIds)))
                 .map(EvaluationsResponse::allPermitted)
@@ -85,9 +85,9 @@ public class ReactiveBulkDeleteController {
                 .onErrorReturn(false);
     }
 
-    private EvaluationsRequest deleteEach(Jwt caller, Set<String> documentIds) {
+    private EvaluationsRequest deleteEach(Authentication caller, Set<String> documentIds) {
         EvaluationsRequest.Builder batch = EvaluationsRequest.builder()
-                .subject(subjectResolver.resolve(caller.getClaims()))
+                .subject(callerSubjects.of(caller).orElseThrow(() -> new AccessDeniedException("No subject")))
                 .action(Action.of("delete"))
                 .semantic(EvaluationsSemantic.DENY_ON_FIRST_DENY);
         for (String documentId : documentIds) {
