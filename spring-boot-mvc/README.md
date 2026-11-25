@@ -8,7 +8,7 @@ Spring Boot offers two web stacks: Spring MVC on servlets, used here, and the re
 WebFlux. The starter supports both; [spring-boot-webflux](../spring-boot-webflux) is the same
 application on WebFlux.
 
-> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.4.0.
+> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.5.0.
 
 ## What it shows
 
@@ -27,7 +27,7 @@ application on WebFlux.
 - **A batch with `deny_on_first_deny`.**
   [`BulkDeleteController`](src/main/java/io/github/authzenenforcer/examples/springbootmvc/BulkDeleteController.java)
   deletes several documents at once, all or none. `@CheckPermission` asks about one resource, so
-  the handler asks the PDP itself, with the starter's `AuthZenClient` and `SubjectResolver`: one
+  the handler asks the PDP itself, with the starter's `AuthZenClient` and `CallerSubjects`: one
   Access Evaluations request with a `delete` for every document and
   `options.evaluations_semantic` set to `deny_on_first_deny`, so the PDP stops at the first
   document the caller may not delete. A decision it did not return counts as a deny.

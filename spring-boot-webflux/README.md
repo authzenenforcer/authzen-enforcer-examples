@@ -9,7 +9,7 @@ here. This example mirrors [spring-boot-mvc](../spring-boot-mvc): the same endpo
 settings and decision check, with the same results. What differs is listed under
 [Reactive](#reactive).
 
-> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.4.0.
+> The starter is a preview, available since authzen-enforcer 0.2.0. This example uses 0.5.0.
 
 ## What it shows
 
@@ -29,7 +29,7 @@ settings and decision check, with the same results. What differs is listed under
   [`ReactiveBulkDeleteController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/ReactiveBulkDeleteController.java)
   deletes several documents at once, all or none. `@CheckPermission` asks about one resource, so
   the handler asks the PDP itself, with the starter's `ReactiveAuthZenClient` and
-  `SubjectResolver`: one Access Evaluations request with a `delete` for every document and
+  `CallerSubjects`: one Access Evaluations request with a `delete` for every document and
   `options.evaluations_semantic` set to `deny_on_first_deny`, so the PDP stops at the first
   document the caller may not delete. A decision it did not return counts as a deny.
 - **Filtering a list.** The `list` decision on `GET /documents` is about the collection, not about

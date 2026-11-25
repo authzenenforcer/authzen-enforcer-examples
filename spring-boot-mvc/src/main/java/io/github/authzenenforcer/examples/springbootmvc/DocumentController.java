@@ -1,20 +1,20 @@
 package io.github.authzenenforcer.examples.springbootmvc;
 
 import io.github.authzenenforcer.core.client.AuthZenClient;
-import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.Context;
 import io.github.authzenenforcer.core.model.EvaluationItem;
 import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.Resource;
+import io.github.authzenenforcer.spring.CallerSubjects;
 import io.github.authzenenforcer.spring.CheckPermission;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,8 +35,8 @@ import java.util.stream.IntStream;
  * route. {@code GET /documents/handbook} asks whether the caller may {@code read}
  * {@code {"type": "document", "id": "handbook"}}, and {@code GET /documents} whether it may
  * {@code list} {@code {"type": "collection", "id": "document"}}. The subject is the caller of the
- * access token. The handler runs only if the PDP permits the request; {@link #list(Jwt)} then
- * filters the documents.
+ * access token. The handler runs only if the PDP permits the request;
+ * {@link #list(Authentication)} then filters the documents.
  */
 @RestController
 @RequestMapping("/documents")
@@ -45,9 +45,9 @@ public class DocumentController {
 
     private final Documents documents;
     private final AuthZenClient client;
-    private final SubjectResolver subjects;
+    private final CallerSubjects subjects;
 
-    DocumentController(Documents documents, AuthZenClient client, SubjectResolver subjects) {
+    DocumentController(Documents documents, AuthZenClient client, CallerSubjects subjects) {
         this.documents = documents;
         this.client = client;
         this.subjects = subjects;
@@ -58,7 +58,8 @@ public class DocumentController {
      * may list the collection at all; that decision is about the collection, not about the
      * documents in it, so the handler filters them itself. One Access Evaluations request asks for a
      * {@code read} of every document, with the same subject and context as {@link #read(String)},
-     * so that the list shows exactly the documents the caller could open. The default semantic,
+     * so that the list shows exactly the documents the caller could open; {@link CallerSubjects}
+     * infers the subject as {@code @CheckPermission} does. The default semantic,
      * {@code execute_all}, returns a decision for each; the client rejects an answer that lacks one,
      * and that fails the request like any other failure of the PDP.
      *
@@ -68,8 +69,8 @@ public class DocumentController {
      * come back short and the totals count documents the caller cannot see.
      */
     @GetMapping
-    public List<String> list(@AuthenticationPrincipal Jwt caller) {
-        if (caller == null) {
+    public List<String> list(Authentication caller) {
+        if (!(caller instanceof JwtAuthenticationToken token)) {
             // Reached only if the starter lets anonymous callers through and the PDP permits them to
             // list; documents are read with the caller's claims, so answer 401
             throw new AuthenticationCredentialsNotFoundException("No access token");
@@ -80,11 +81,12 @@ public class DocumentController {
             return ids;
         }
         try {
+            boolean secondFactor = "mfa".equals(token.getToken().getClaimAsString("acr"));
             EvaluationsRequest.Builder request = EvaluationsRequest.builder()
-                    .subject(subjects.resolve(caller.getClaims()))
+                    .subject(subjects.of(token).orElseThrow(() -> new AccessDeniedException("No subject")))
                     .action(Action.of("read"))
                     // The value of the context entry of read()
-                    .context(Context.builder().put("mfa", "mfa".equals(caller.getClaimAsString("acr"))).build());
+                    .context(Context.builder().put("mfa", secondFactor).build());
             ids.forEach(id -> request.evaluation(
                     EvaluationItem.builder().resource(Resource.of("document", id)).build()));
             EvaluationsResponse decisions = client.evaluations(request.build());

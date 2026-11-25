@@ -1,20 +1,20 @@
 package io.github.authzenenforcer.examples.springbootwebflux;
 
-import io.github.authzenenforcer.core.enforce.SubjectResolver;
 import io.github.authzenenforcer.core.model.Action;
 import io.github.authzenenforcer.core.model.Context;
 import io.github.authzenenforcer.core.model.EvaluationItem;
 import io.github.authzenenforcer.core.model.EvaluationsRequest;
 import io.github.authzenenforcer.core.model.EvaluationsResponse;
 import io.github.authzenenforcer.core.model.Resource;
+import io.github.authzenenforcer.spring.CallerSubjects;
 import io.github.authzenenforcer.spring.CheckPermission;
 import io.github.authzenenforcer.spring.reactive.ReactiveAuthZenClient;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,7 +37,7 @@ import java.util.stream.IntStream;
  * {@code {"type": "document", "id": "handbook"}}, and {@code GET /documents} whether it may
  * {@code list} {@code {"type": "collection", "id": "document"}}. The subject is the caller of the
  * access token. The handler runs only if the PDP permits the request;
- * {@link #readableDocuments(Jwt)} then filters the documents.
+ * {@link #readableDocuments(Authentication)} then filters the documents.
  *
  * <p>The starter decides before the handler's arguments are resolved, so the body of a request that
  * the PDP denies is never read. The decision starts on Reactor's bounded elastic scheduler and does
@@ -50,12 +50,12 @@ public class ReactiveDocumentController {
 
     private final Documents store;
     private final ReactiveAuthZenClient pdp;
-    private final SubjectResolver subjectResolver;
+    private final CallerSubjects callerSubjects;
 
-    ReactiveDocumentController(Documents store, ReactiveAuthZenClient pdp, SubjectResolver subjectResolver) {
+    ReactiveDocumentController(Documents store, ReactiveAuthZenClient pdp, CallerSubjects callerSubjects) {
         this.store = store;
         this.pdp = pdp;
-        this.subjectResolver = subjectResolver;
+        this.callerSubjects = callerSubjects;
     }
 
     /**
@@ -76,8 +76,8 @@ public class ReactiveDocumentController {
      * come back short and the totals count documents the caller cannot see.
      */
     @GetMapping
-    public Mono<List<String>> readableDocuments(@AuthenticationPrincipal Jwt caller) {
-        if (caller == null) {
+    public Mono<List<String>> readableDocuments(Authentication caller) {
+        if (!(caller instanceof JwtAuthenticationToken token)) {
             // Reached only if the starter lets anonymous callers through and the PDP permits them to
             // list; documents are read with the caller's claims, so answer 401
             return Mono.error(new AuthenticationCredentialsNotFoundException("No access token"));
@@ -88,7 +88,7 @@ public class ReactiveDocumentController {
             return Mono.just(documentIds);
         }
         // Deferred, so that a failure to build the request fails the subscription like one of the PDP
-        return Mono.defer(() -> pdp.evaluations(readEach(caller, documentIds)))
+        return Mono.defer(() -> pdp.evaluations(readEach(token, documentIds)))
                 .map(decisions -> permitted(documentIds, decisions))
                 // Whatever fails, from resolving the subject to the PDP's answer: fail closed rather
                 // than list nothing
@@ -96,10 +96,10 @@ public class ReactiveDocumentController {
     }
 
     /** One {@code read} per document, with the subject and the context entry of readDocument(). */
-    private EvaluationsRequest readEach(Jwt caller, List<String> documentIds) {
-        boolean secondFactor = "mfa".equals(caller.getClaimAsString("acr"));
+    private EvaluationsRequest readEach(JwtAuthenticationToken caller, List<String> documentIds) {
+        boolean secondFactor = "mfa".equals(caller.getToken().getClaimAsString("acr"));
         EvaluationsRequest.Builder batch = EvaluationsRequest.builder()
-                .subject(subjectResolver.resolve(caller.getClaims()))
+                .subject(callerSubjects.of(caller).orElseThrow(() -> new AccessDeniedException("No subject")))
                 .action(Action.of("read"))
                 .context(Context.builder().put("mfa", secondFactor).build());
         for (String documentId : documentIds) {
