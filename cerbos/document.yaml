@@ -1,0 +1,53 @@
+# The documents of the scenario, for Cerbos as the PDP. Cerbos takes the roles of the principal from
+# the AuthZEN subject property "cerbos.roles", its other properties as principal attributes, and the
+# resource properties as resource attributes. It does not look anything up.
+#
+# The rules grant actions to roles for every document, also for those created later. Only the
+# documents that the scenario treats differently are named; a policy on an attribute of the
+# documents, such as a classification, would need the PEP to send it. Anything not allowed here
+# is denied.
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "document"
+  version: "default"
+  rules:
+    # Every role reads the documents, except the salary report
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["viewer", "editor", "admin", "hr"]
+      condition:
+        match:
+          expr: request.resource.id != "salary-report"
+    # Editors and admins update the documents, except the two below
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      roles: ["editor", "admin"]
+      condition:
+        match:
+          expr: '!(request.resource.id in ["salary-report", "release-notes"])'
+    # The release notes, only while they are a draft
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      roles: ["editor", "admin"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.id == "release-notes"
+              - expr: has(request.resource.attr.status) && request.resource.attr.status == "draft"
+    # The salary report, only for hr and after a sign-in with a second factor. Cerbos passes no
+    # AuthZEN context entry of the PEP to the policies, so the PEP sends the acr claim of the token
+    # as a subject property
+    - actions: ["read", "update"]
+      effect: EFFECT_ALLOW
+      roles: ["hr"]
+      condition:
+        match:
+          all:
+            of:
+              - expr: request.resource.id == "salary-report"
+              - expr: has(request.principal.attr.acr) && request.principal.attr.acr == "mfa"
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      roles: ["admin"]

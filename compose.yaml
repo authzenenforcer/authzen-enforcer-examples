@@ -1,4 +1,5 @@
-# Keycloak as the AuthZEN Policy Decision Point (PDP) for all examples.
+# Keycloak as the AuthZEN Policy Decision Point (PDP) for all examples, and the identity provider
+# that issues the callers' tokens.
 #
 #   export DOCUMENT_PORTAL_CLIENT_SECRET=$(openssl rand -hex 24)
 #   export EXAMPLE_USER_PASSWORD=$(openssl rand -hex 24)
@@ -8,7 +9,14 @@
 # the environment when it imports the realm.
 #
 # KEYCLOAK_ADDRESS and KEYCLOAK_PORT set where Keycloak is published (default 127.0.0.1:8080). The
-# image stays a literal so that Dependabot can update it.
+# images stay literals so that Dependabot can update them.
+#
+# Cerbos is a second PDP for the Spring examples, off by default. It starts with the profile cerbos,
+# next to Keycloak, which still issues the tokens:
+#
+#   docker compose --profile cerbos up --wait
+#
+# CERBOS_ADDRESS and CERBOS_PORT set where its HTTP API is published (default 127.0.0.1:3592).
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.2
@@ -36,3 +44,19 @@ services:
       timeout: 5s
       retries: 30
       start_period: 10s
+  cerbos:
+    image: ghcr.io/cerbos/cerbos:0.58.0
+    profiles: ["cerbos"]
+    # Cerbos reads the policies in /policies and needs no setting for its AuthZEN API. In this
+    # configuration it does not authenticate the PEPs that call it, so it is published on this
+    # machine only
+    ports:
+      - "${CERBOS_ADDRESS:-127.0.0.1}:${CERBOS_PORT:-3592}:3592"
+    volumes:
+      - ./cerbos:/policies:ro
+    healthcheck:
+      # The image's own check, more often than its default
+      test: ["CMD", "/cerbos", "healthcheck"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

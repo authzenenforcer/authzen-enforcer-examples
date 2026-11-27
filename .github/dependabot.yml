@@ -8,7 +8,7 @@ updates:
     groups:
       maven:
         patterns: ["*"]
-  # The Keycloak image in compose.yaml; CI checks the realm's decisions with every new version
+  # The images in compose.yaml, Keycloak and Cerbos; CI checks the decisions with every new version
   - package-ecosystem: docker-compose
     directory: /
     schedule:

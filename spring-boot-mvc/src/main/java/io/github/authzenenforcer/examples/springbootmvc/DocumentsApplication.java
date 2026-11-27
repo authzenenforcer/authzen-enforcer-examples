@@ -35,23 +35,33 @@ import java.time.Duration;
 public class DocumentsApplication {
 
     public static void main(String[] args) {
-        // application.yaml takes the PEP's client secret from this variable. Without it, Spring Boot
-        // would send the unresolved placeholder as the secret and every request would be denied
-        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
-        if (secret == null || secret.isEmpty()) {
-            System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
-            System.exit(2);
-        }
         SpringApplication application = new SpringApplication(DocumentsApplication.class);
-        // Checked once the settings are known, before any server starts
+        // Checked once the settings and the profiles are known, before any server starts
         application.addListeners((ApplicationListener<ApplicationEnvironmentPreparedEvent>) event -> {
-            String exposure = actuatorExposure(event.getEnvironment());
-            if (exposure != null) {
-                System.err.println(exposure);
+            String problem = missingSecret(event.getEnvironment());
+            if (problem == null) {
+                problem = actuatorExposure(event.getEnvironment());
+            }
+            if (problem != null) {
+                System.err.println(problem);
                 System.exit(2);
             }
         });
         application.run(args);
+    }
+
+    /**
+     * Why the PEP could not authenticate to the PDP, or null if it can. With a client registration
+     * for the PDP, as in the keycloak profile, its client secret comes from this variable. Without
+     * it, Spring Boot would send the unresolved placeholder as the secret and every request would be
+     * denied.
+     */
+    static String missingSecret(Environment environment) {
+        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
+        if (environment.containsProperty("authzen.pdp.client-registration-id") && (secret == null || secret.isEmpty())) {
+            return "Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal";
+        }
+        return null;
     }
 
     /**

@@ -1,0 +1,21 @@
+# The collections of the scenario, for Cerbos as the PDP: GET /documents and POST /documents are
+# list and create on {"type": "collection", "id": "document"}. This API has no other collection, so
+# the rules name this one; any other is denied.
+---
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  resource: "collection"
+  version: "default"
+  rules:
+    - actions: ["list"]
+      effect: EFFECT_ALLOW
+      roles: ["viewer", "editor", "admin", "hr"]
+      condition:
+        match:
+          expr: request.resource.id == "document"
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      roles: ["editor", "admin"]
+      condition:
+        match:
+          expr: request.resource.id == "document"

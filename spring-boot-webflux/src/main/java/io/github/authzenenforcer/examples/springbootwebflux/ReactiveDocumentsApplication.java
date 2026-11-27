@@ -40,21 +40,30 @@ import java.util.Optional;
 public class ReactiveDocumentsApplication {
 
     public static void main(String[] args) {
-        // application.yaml takes the PEP's client secret from this variable. Without it, Spring Boot
-        // would send the unresolved placeholder as the secret and every request would be denied
-        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
-        if (secret == null || secret.isEmpty()) {
-            System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
-            System.exit(2);
-        }
         SpringApplication application = new SpringApplication(ReactiveDocumentsApplication.class);
-        // Before Netty binds any port: Actuator must stay on this machine
+        // Before Netty binds any port: the PEP needs its secret, and Actuator must stay on this machine
         application.addListeners((ApplicationListener<ApplicationEnvironmentPreparedEvent>) prepared ->
-                publicActuator(prepared.getEnvironment()).ifPresent(reason -> {
-                    System.err.println(reason);
-                    System.exit(2);
-                }));
+                missingClientSecret(prepared.getEnvironment())
+                        .or(() -> publicActuator(prepared.getEnvironment()))
+                        .ifPresent(reason -> {
+                            System.err.println(reason);
+                            System.exit(2);
+                        }));
         application.run(args);
+    }
+
+    /**
+     * Why the PEP could not authenticate to the PDP, if it could not. With a client registration for
+     * the PDP, as in the keycloak profile, the registration takes its client secret from this
+     * variable. Without it, Spring Boot would send the unresolved placeholder as the secret and every
+     * request would be denied.
+     */
+    static Optional<String> missingClientSecret(Environment settings) {
+        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
+        boolean needed = settings.containsProperty("authzen.pdp.client-registration-id");
+        return needed && (secret == null || secret.isEmpty())
+                ? Optional.of("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal")
+                : Optional.empty();
     }
 
     /**

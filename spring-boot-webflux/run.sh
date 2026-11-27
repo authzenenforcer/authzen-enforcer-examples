@@ -1,11 +1,12 @@
 #!/bin/sh
-# Runs the spring-boot-webflux example with the Keycloak of this repository.
+# Runs the spring-boot-webflux example with the Keycloak of this repository, which issues the callers'
+# tokens and decides, or with Cerbos as the PDP.
 #
 #   spring-boot-webflux/run.sh          start Keycloak and the application, and show a few calls;
 #                                       both keep running
 #   spring-boot-webflux/run.sh check    run the decision check of the application, then stop it;
 #                                       exits with 1 if a status or a meter differs from the expected one
-#   spring-boot-webflux/run.sh stop     stop the application and Keycloak
+#   spring-boot-webflux/run.sh stop     stop the application, Keycloak and Cerbos
 #
 # The secrets of the realm are kept in .env in the repository root, which Git ignores and Docker
 # Compose reads by itself. The first run creates it, from DOCUMENT_PORTAL_CLIENT_SECRET and
@@ -14,6 +15,8 @@
 #
 # Settings, all optional:
 #   KEYCLOAK_PORT  the port of Keycloak, default 8080; kept in .env once given
+#   PDP=cerbos     Cerbos as the PDP instead of Keycloak, with the policies in cerbos/
+#   CERBOS_PORT    the port of Cerbos, default 3592
 #   DEBUG=1        start the application with a debugger port on 127.0.0.1:5005
 #   MANAGEMENT_SERVER_PORT
 #                  the port of Actuator on 127.0.0.1, default 9082
@@ -53,16 +56,33 @@ load_env() {
     fi
     KEYCLOAK=http://127.0.0.1:$KEYCLOAK_PORT
     REALM=$KEYCLOAK/realms/authzen-examples
+    PDP=${PDP:-keycloak}
+    case "$PDP" in
+        keycloak)
+            PDP_ARGS=""
+            COMPOSE_PROFILE=""
+            ;;
+        cerbos)
+            # The application profile cerbos; the realm still issues the tokens
+            PDP_ARGS="--spring.profiles.active=cerbos --authzen.pdp.url=http://127.0.0.1:${CERBOS_PORT:-3592}"
+            COMPOSE_PROFILE="--profile cerbos"
+            ;;
+        *)
+            echo "PDP must be keycloak or cerbos" >&2
+            exit 2
+            ;;
+    esac
 }
 
-start_keycloak() {
+start_containers() {
     # A Keycloak started with other secrets imported the realm with them: start a fresh one
     running=$(docker compose exec -T keycloak printenv DOCUMENT_PORTAL_CLIENT_SECRET 2>/dev/null || true)
     if [ -n "$running" ] && [ "$running" != "$DOCUMENT_PORTAL_CLIENT_SECRET" ]; then
         echo "Keycloak runs with other secrets than $ENV_FILE; starting a fresh one"
-        docker compose down
+        docker compose --profile cerbos down
     fi
-    docker compose up --wait
+    # shellcheck disable=SC2086
+    docker compose $COMPOSE_PROFILE up --wait
 }
 
 start_app() {
@@ -73,7 +93,7 @@ start_app() {
         debug="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:5005"
     fi
     # shellcheck disable=SC2086
-    java $debug -jar "$APP_JAR" --authzen.pdp.url="$REALM" > "$LOG_FILE" 2>&1 &
+    java $debug -jar "$APP_JAR" --example.realm-url="$REALM" $PDP_ARGS > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 }
 
@@ -123,12 +143,12 @@ demo() {
     actuator=http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-9082}/actuator
     bob=$(token bob)
     echo
-    echo "Calls to the application, $APP_URL:"
+    echo "Calls to the application, $APP_URL, with $PDP as the PDP:"
     call "$bob" GET /documents/handbook "bob reads the handbook"
     call "$bob" DELETE /documents/handbook "bob deletes the handbook (only admins may)"
     call "" GET /documents/handbook "a caller without a token reads the handbook"
     echo
-    echo "The application and Keycloak keep running; the log of the application is in $LOG_FILE."
+    echo "The application and the containers keep running; the log of the application is in $LOG_FILE."
     echo "For your own calls, load the secrets and get a token, for example for alice:"
     echo
     echo "  set -a; . ./$ENV_FILE; set +a"
@@ -142,28 +162,29 @@ demo() {
     echo "  curl -s $actuator/health/authzen | jq"
     echo "  curl -s $actuator/metrics/authzen.enforcements | jq"
     echo
-    echo "Stop both with: spring-boot-webflux/run.sh stop"
+    echo "Stop them with: spring-boot-webflux/run.sh stop"
 }
 
 case "${1:-start}" in
     start)
         load_env
-        start_keycloak
+        start_containers
         start_app
         wait_for_app
         demo
         ;;
     check)
         load_env
-        start_keycloak
+        start_containers
         stop_app
         mvn -q -f spring-boot-webflux package
-        java -jar "$APP_JAR" --authzen.pdp.url="$REALM" --example.check=true
+        # shellcheck disable=SC2086
+        java -jar "$APP_JAR" --example.realm-url="$REALM" $PDP_ARGS --example.check=true
         ;;
     stop)
         load_env
         stop_app
-        docker compose down
+        docker compose --profile cerbos down
         ;;
     *)
         echo "Usage: $0 [start|check|stop]" >&2

@@ -16,6 +16,9 @@ repository root only builds all examples at once.
 
 All examples talk to the same Policy Decision Point (PDP): a [Keycloak](https://www.keycloak.org/)
 container with the experimental AuthZEN feature enabled and a realm prepared for these examples.
+The Spring examples can ask [Cerbos](https://www.cerbos.dev/) instead, with the same code and
+another Spring profile, while Keycloak still issues the tokens; see
+[Cerbos as an AuthZEN PDP](#cerbos-as-an-authzen-pdp).
 
 | Example | Shows | Status |
 |---|---|---|
@@ -84,8 +87,9 @@ scripts start the PDP as well and keep the secrets in `.env`, see
 [spring-boot-mvc](spring-boot-mvc/README.md) and [spring-boot-webflux](spring-boot-webflux/README.md):
 
 ```bash
-spring-boot-mvc/run.sh        # on port 8081
-spring-boot-webflux/run.sh    # on port 8082
+spring-boot-mvc/run.sh               # on port 8081
+spring-boot-webflux/run.sh           # on port 8082
+PDP=cerbos spring-boot-mvc/run.sh    # with Cerbos as the PDP
 ```
 
 Each example compares the decisions it gets with the ones the realm should make and exits with
@@ -167,6 +171,47 @@ them. The behaviour below was checked with Keycloak 26.8.1 and affects how the e
 - **`subject.properties` override the user's attributes** in Keycloak
   ([keycloak/keycloak#53328](https://github.com/keycloak/keycloak/issues/53328)). The realm does not
   base any decision on subject attributes.
+
+## Cerbos as an AuthZEN PDP
+
+[Cerbos](https://www.cerbos.dev/) decides with policies that grant actions on a kind of resource to
+roles. The Spring examples use it with the Spring profile `cerbos`
+([`application-cerbos.yaml`](spring-boot-mvc/src/main/resources/application-cerbos.yaml)) and
+the policies in [`cerbos/`](cerbos). `PDP=cerbos` makes their `run.sh` start it next to Keycloak,
+which still issues the callers' tokens; on its own:
+
+```bash
+docker compose --profile cerbos up --wait
+```
+
+Its HTTP API listens on `http://127.0.0.1:3592`; `CERBOS_ADDRESS` and `CERBOS_PORT` change the
+address and the port. The behaviour below was checked with Cerbos 0.58.0 in its default
+configuration and affects how the profile is written:
+
+- **The endpoints are at the default paths**, and Cerbos publishes metadata. Only the Access
+  Evaluation and Access Evaluations APIs are available.
+- **The PEP is not authenticated.** Cerbos answers without credentials and ignores an
+  `Authorization` header, so the profile sends no token, and `compose.yaml` publishes Cerbos on
+  this machine only. Anyone who can reach the API can ask it about any subject; restrict who can,
+  for example with TLS and network policies.
+- **The roles come with the request.** Cerbos does not look up a subject: it takes the roles from
+  the subject property `cerbos.roles`, one property with a dot in its name, and the other subject
+  properties as attributes of the principal. The profile sends the realm roles of the token
+  (`realm_access.roles`); a user without a role sends none and is denied. Roles that an application
+  holds as Spring Security authorities instead, for example from a `UserDetailsService` or a
+  login, would be sent with `authzen.enforcer.subject.authorities.property`.
+- **Only Cerbos's own `context` entries reach the policies** (`cerbos.requestId`, `cerbos.auxData`,
+  `cerbos.includeMeta`); others, such as `mfa`, are accepted and not used. The rule of the salary
+  report therefore reads how the user signed in from the subject: the profile sends the `acr`
+  claim as a subject property. Cerbos could read the claims from the user's token in
+  `cerbos.auxData`, but the PEP does not forward the user's token to the PDP.
+- **A rule covers every resource of its kind,** also those created later. The policies name only
+  the documents that the scenario treats differently, the salary report and the release notes. So
+  unlike the realm, Cerbos lets bob list the document he creates, and lets alice delete a document
+  that does not exist, which the application then answers with `404`. Policies on attributes of
+  the documents, such as a classification, would need the PEP to send them.
+- **A request without roles, an unknown kind or an action that no rule allows is a deny**
+  (`"decision": false`), not an error.
 
 ## License
 
