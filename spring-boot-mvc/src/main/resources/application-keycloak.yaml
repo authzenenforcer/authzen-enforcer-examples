@@ -1,0 +1,25 @@
+# Keycloak as the PDP, the default profile: the realm of compose.yaml decides as well as issues the
+# callers' tokens.
+authzen:
+  pdp:
+    # The only setting the starter requires: the PDP's base URL, here the realm. The endpoints come
+    # from the metadata it publishes. Plain HTTP only because Keycloak runs on this machine. Use https
+    # anywhere else: the PEP's token and client secret travel over it
+    url: ${example.realm-url}
+    # The PEP's own credentials: the client credentials grant of the registration below
+    client-registration-id: pdp
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          pdp:
+            # The confidential client document-portal. Its secret comes from the environment
+            # variable DOCUMENT_PORTAL_CLIENT_SECRET, never from a file or the command line
+            client-id: ${example.pep-client-id}
+            client-secret: ${DOCUMENT_PORTAL_CLIENT_SECRET}
+            authorization-grant-type: client_credentials
+        provider:
+          pdp:
+            token-uri: ${example.realm-url}/protocol/openid-connect/token

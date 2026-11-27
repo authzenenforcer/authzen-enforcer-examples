@@ -74,9 +74,14 @@ jobs:
         run: spring-boot-mvc/run.sh check
       - name: Run the decision check of spring-boot-webflux
         run: spring-boot-webflux/run.sh check
-      - name: Keycloak logs
+      # The same applications with Cerbos as the PDP; run.sh starts it next to Keycloak
+      - name: Run the decision check of spring-boot-mvc with Cerbos
+        run: PDP=cerbos spring-boot-mvc/run.sh check
+      - name: Run the decision check of spring-boot-webflux with Cerbos
+        run: PDP=cerbos spring-boot-webflux/run.sh check
+      - name: Keycloak and Cerbos logs
         if: failure()
-        run: docker compose logs keycloak
-      - name: Stop Keycloak
+        run: docker compose --profile cerbos logs
+      - name: Stop Keycloak and Cerbos
         if: always()
-        run: docker compose down
+        run: docker compose --profile cerbos down

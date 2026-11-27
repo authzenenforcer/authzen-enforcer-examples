@@ -69,12 +69,14 @@ class DecisionCheck implements ApplicationRunner {
     private final RestClient tokens;
     private final String userClientId;
     private final String clientId;
+    private final boolean newDocumentsDecided;
     private final Map<String, String> userTokens = new HashMap<>();
 
     DecisionCheck(ConfigurableApplicationContext context, Environment environment, MeterRegistry registry,
             SdkTracerProvider tracerProvider, RecordedSpans spans,
             @Value("${example.token-url}") String tokenUrl, @Value("${example.user-client-id}") String userClientId,
-            @Value("${spring.security.oauth2.client.registration.pdp.client-id}") String clientId) {
+            @Value("${example.pep-client-id}") String clientId,
+            @Value("${example.pdp-decides-new-documents}") boolean newDocumentsDecided) {
         this.context = context;
         this.environment = environment;
         this.registry = registry;
@@ -83,6 +85,7 @@ class DecisionCheck implements ApplicationRunner {
         this.tokens = RestClient.create(tokenUrl);
         this.userClientId = userClientId;
         this.clientId = clientId;
+        this.newDocumentsDecided = newDocumentsDecided;
     }
 
     @Override
@@ -90,6 +93,12 @@ class DecisionCheck implements ApplicationRunner {
         String password = System.getenv("EXAMPLE_USER_PASSWORD");
         if (password == null || password.isEmpty()) {
             System.err.println("Set EXAMPLE_USER_PASSWORD to the password of the realm's users");
+            exit(2);
+            return;
+        }
+        String secret = System.getenv("DOCUMENT_PORTAL_CLIENT_SECRET");
+        if (secret == null || secret.isEmpty()) {
+            System.err.println("Set DOCUMENT_PORTAL_CLIENT_SECRET to the secret of the client document-portal");
             exit(2);
             return;
         }
@@ -128,18 +137,21 @@ class DecisionCheck implements ApplicationRunner {
                 "/documents", password);
         unexpected += expect(api, "carol creates a document", 403, "carol", HttpMethod.POST, "/documents", password);
         unexpected += expect(api, "bob creates a document", 201, "bob", HttpMethod.POST, "/documents", password);
-        // bob's document-4 is unknown to the realm, so the PDP never permits reading it
-        unexpected += expectList(api, "bob lists the documents, without his new one", "bob",
-                List.of("handbook", "release-notes"), password);
+        // The realm does not know bob's document-4 and never permits reading it; Cerbos decides about it
+        // by its kind, like about the others
+        unexpected += expectList(api, "bob lists the documents", "bob", newDocumentsDecided
+                ? List.of("document-4", "handbook", "release-notes")
+                : List.of("handbook", "release-notes"), password);
         unexpected += expect(api, "alice deletes the handbook", 204, "alice", HttpMethod.DELETE, "/documents/handbook",
                 password);
         System.out.println();
         System.out.println("Several documents at once");
         unexpected += expectBulkDelete(api, "bob deletes the release notes and the salary report", 403, "bob",
                 List.of("release-notes", "salary-report"), password);
-        // bob's document-4 is unknown to the realm, so it is denied, and the release notes stay
-        unexpected += expectBulkDelete(api, "alice deletes the release notes and bob's new document", 403, "alice",
-                List.of("release-notes", "document-4"), password);
+        // Nothing is deleted, and the release notes stay: the realm denies a document it does not know,
+        // and Cerbos permits it, but it does not exist
+        unexpected += expectBulkDelete(api, "alice deletes the release notes and a document that does not exist",
+                newDocumentsDecided ? 404 : 403, "alice", List.of("release-notes", "document-99"), password);
         unexpected += expectBulkDelete(api, "alice deletes the release notes and the salary report", 204, "alice",
                 List.of("release-notes", "salary-report"), password);
         System.out.println();
@@ -381,7 +393,10 @@ class DecisionCheck implements ApplicationRunner {
         });
     }
 
-    /** The PEP's own token, from the client credentials grant, as the PEP obtains it for the PDP. */
+    /**
+     * The PEP's own token, from the client credentials grant, as the PEP obtains it when Keycloak is the
+     * PDP. A token of the realm, but not one for this API.
+     */
     private String pepToken() {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "client_credentials");

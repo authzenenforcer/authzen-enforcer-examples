@@ -1,0 +1,23 @@
+# Cerbos as the PDP: --spring.profiles.active=cerbos. The Keycloak realm still issues the callers'
+# tokens; Cerbos decides with the policies in cerbos/ of the repository root.
+authzen:
+  pdp:
+    # The HTTP API of the Cerbos of compose.yaml, which publishes metadata like any AuthZEN PDP.
+    # No client-registration-id: Cerbos does not authenticate PEPs in its default configuration and
+    # would ignore a token, so the PEP sends none. Anyone who can reach this API can ask it about
+    # any subject; restrict who can, for example with TLS and network policies
+    url: http://127.0.0.1:3592
+  enforcer:
+    subject:
+      properties:
+        # Cerbos does not look up the roles of a subject: it takes them from this property, a name
+        # with a dot in it. The realm's tokens carry them in realm_access.roles; a caller without a
+        # role sends none, and Cerbos denies
+        cerbos.roles: realm_access.roles
+        # Cerbos passes only its own context entries to the policies, not context.mfa, so the policy
+        # of the salary report reads how the caller signed in from the subject: the acr claim
+        acr: acr
+
+example:
+  # The policies decide about every document by its kind, also about those created later
+  pdp-decides-new-documents: true

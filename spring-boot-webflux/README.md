@@ -15,6 +15,8 @@ settings and decision check, with the same results. What differs is listed under
 
 - **Zero configuration for the PDP.** `authzen.pdp.url` is the only setting the starter needs; it
   finds the endpoints in the PDP's metadata.
+- **Another PDP, the same code.** With the Spring profile `cerbos`, Cerbos decides instead of
+  Keycloak; only the configuration differs. See [With Cerbos as the PDP](#with-cerbos-as-the-pdp).
 - **Inference.** [`ReactiveDocumentController`](src/main/java/io/github/authzenenforcer/examples/springbootwebflux/ReactiveDocumentController.java)
   names no action and no resource. `GET /documents/handbook` becomes `read` on
   `{"type": "document", "id": "handbook"}`, `GET /documents` becomes `list` on
@@ -37,14 +39,14 @@ settings and decision check, with the same results. What differs is listed under
   `ReactiveDocumentController` asks the PDP about every document in one Access Evaluations request, with
   the same `read`, subject and context as reading one, and returns only the permitted ones. A
   decision per document needs a PDP that can decide about each of them; this realm knows only the
-  documents it was created with, so a document created later is never listed. With pagination,
-  filter before paging, or the pages come back short and the totals count documents the caller
-  cannot see.
-- **The PEP's own identity.** The application authenticates to the PDP as the confidential client
-  `document-portal`, with the client credentials grant. `authzen.pdp.client-registration-id` names
-  the registration of Spring Security's OAuth 2.0 client that obtains, caches and renews the token,
-  and `ReactiveDocumentsApplication` adds connect and response timeouts to its token requests. The starter never forwards the
-  caller's token.
+  documents it was created with, so a document created later is never listed (Cerbos, whose rules
+  cover every document, lists it). With pagination, filter before paging, or the pages come back
+  short and the totals count documents the caller cannot see.
+- **The PEP's own identity.** With Keycloak as the PDP, the application authenticates to it as the
+  confidential client `document-portal`, with the client credentials grant.
+  `authzen.pdp.client-registration-id` names the registration of Spring Security's OAuth 2.0 client
+  that obtains, caches and renews the token, and `ReactiveDocumentsApplication` adds connect and
+  response timeouts to its token requests. The starter never forwards the caller's token.
 - **Tokens issued for this API only.** Spring Security accepts an access token of the realm only
   if its audience is `documents-api`, which the realm adds to the tokens of `documents-cli`. Any
   other token of the realm, such as the one the PEP obtains for the PDP, gets `401`.
@@ -95,14 +97,16 @@ TOKEN=$(curl -s http://127.0.0.1:$KEYCLOAK_PORT/realms/authzen-examples/protocol
 curl -i -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8082/documents
 ```
 
-Keycloak issues the tokens and makes the decisions; the application serves the documents API. The
-users are `alice` (admin), `bob` (editor), `carol` (viewer), `dave` (hr) and `erin` (no role); see
-the [main README](../README.md#the-scenario).
+Keycloak issues the tokens and, unless Cerbos is chosen, makes the decisions; the application
+serves the documents API. The users are `alice` (admin), `bob` (editor), `carol` (viewer), `dave`
+(hr) and `erin` (no role); see the [main README](../README.md#the-scenario).
 
 | Setting | |
 |---|---|
 | `KEYCLOAK_PORT=8180 spring-boot-webflux/run.sh` | Keycloak on another port than `8080`, for example when it is taken; kept in `.env` |
 | `DEBUG=1 spring-boot-webflux/run.sh` | the application with a debugger port on `127.0.0.1:5005`, for your IDE's remote debugging |
+| `PDP=cerbos spring-boot-webflux/run.sh` | Cerbos as the PDP; see [With Cerbos as the PDP](#with-cerbos-as-the-pdp) |
+| `CERBOS_PORT=3692 PDP=cerbos spring-boot-webflux/run.sh` | Cerbos on another port than `3592` |
 | `MANAGEMENT_SERVER_PORT=9181 spring-boot-webflux/run.sh` | Actuator on another port than `9082`, for example when it is taken |
 
 `documents-cli` is a public client with the password grant, which the realm has for this example
@@ -132,12 +136,12 @@ The document collection
   403 erin, who has no role, lists the documents
   403 carol creates a document
   201 bob creates a document
-  200 bob lists the documents, without his new one: [handbook, release-notes]
+  200 bob lists the documents: [handbook, release-notes]
   204 alice deletes the handbook
 
 Several documents at once
   403 bob deletes the release notes and the salary report
-  403 alice deletes the release notes and bob's new document
+  403 alice deletes the release notes and a document that does not exist
   204 alice deletes the release notes and the salary report
 
 Actuator
@@ -161,6 +165,43 @@ Tracing
 
 All statuses, meters and spans are as expected.
 ```
+
+### With Cerbos as the PDP
+
+```bash
+PDP=cerbos spring-boot-webflux/run.sh          # start Keycloak, Cerbos and the application
+PDP=cerbos spring-boot-webflux/run.sh check    # the decision check, against Cerbos
+```
+
+The application is the same. The Spring profile `cerbos`
+([`application-cerbos.yaml`](src/main/resources/application-cerbos.yaml)) takes the place of the
+default profile `keycloak` ([`application-keycloak.yaml`](src/main/resources/application-keycloak.yaml)),
+and only the configuration differs:
+
+- `authzen.pdp.url` names Cerbos. The realm still issues the callers' tokens (`example.realm-url`).
+- No `authzen.pdp.client-registration-id`: Cerbos does not authenticate PEPs in its default
+  configuration, so the PEP sends no token.
+- `authzen.enforcer.subject.properties` adds the realm roles of the token as `cerbos.roles` and
+  its `acr` claim as `acr`. Cerbos does not look up the roles of a subject, and it passes none of
+  the PEP's AuthZEN `context` entries to its policies: the `context.mfa` of reading a document is
+  sent but not used, and the policy of the salary report reads `acr` instead.
+
+The roles are in a claim of the token here, so a claim mapping sends them. An application that
+holds the roles as Spring Security's granted authorities, for example from a `UserDetailsService`,
+a login or a `JwtAuthenticationConverter` that merges or renames them, sends those instead:
+`authzen.enforcer.subject.authorities.property: cerbos.roles` with `prefix: ROLE_`.
+
+The decision check expects the same results, except for documents that the realm does not know:
+the rules of Cerbos cover every document, so bob's new one is listed, and the bulk delete with a
+document that does not exist gets `404` instead of `403`. Nothing is deleted in either case.
+
+```text
+  200 bob lists the documents: [document-4, handbook, release-notes]
+  404 alice deletes the release notes and a document that does not exist
+```
+
+The meters and the spans are the same. The [main README](../README.md#cerbos-as-an-authzen-pdp)
+describes how Cerbos behaves as an AuthZEN PDP.
 
 ## Reactive
 
@@ -276,27 +317,34 @@ included, has the span of its request as its parent instead of starting a trace 
 
 ## Configuration
 
-[`application.yaml`](src/main/resources/application.yaml) has defaults that fit the Keycloak of this
-repository. Override them on the command line, such as
-`--authzen.pdp.url=http://127.0.0.1:8180/realms/authzen-examples`, or with environment variables,
-such as `AUTHZEN_PDP_URL`.
+[`application.yaml`](src/main/resources/application.yaml) has defaults that fit the containers of
+this repository; the settings of the PDP are in
+[`application-keycloak.yaml`](src/main/resources/application-keycloak.yaml), the default profile,
+and [`application-cerbos.yaml`](src/main/resources/application-cerbos.yaml). Override them on the
+command line, such as `--example.realm-url=http://127.0.0.1:8180/realms/authzen-examples`, or with
+environment variables, such as `EXAMPLE_REALM_URL`.
 
 | Setting | Default | |
 |---|---|---|
-| `authzen.pdp.url` | `http://127.0.0.1:8080/realms/authzen-examples` | The PDP; also the issuer of the callers' tokens |
+| `example.realm-url` | `http://127.0.0.1:8080/realms/authzen-examples` | The realm that issues the callers' tokens |
+| `authzen.pdp.url` | the realm; `http://127.0.0.1:3592` with `cerbos` | The PDP |
 | `authzen.enforcer.subject.id-claim` | `preferred_username` | The realm's policies name users by username |
 | `authzen.enforcer.resource.singularize` | `true` | `/documents/{id}` becomes the type `document` |
 | `server.port` | `8082` | Keycloak uses `8080`, the spring-boot-mvc example `8081` |
-| `authzen.pdp.client-registration-id` | `pdp` | The registration that obtains the PEP's token |
-| `spring.security.oauth2.client.registration.pdp.client-id` | `document-portal` | The PEP's client; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
+| `authzen.pdp.client-registration-id` | `pdp`; not set with `cerbos` | The registration that obtains the PEP's token |
+| `example.pep-client-id` | `document-portal` | The PEP's client in the realm; its secret comes from `DOCUMENT_PORTAL_CLIENT_SECRET` |
+| `authzen.enforcer.subject.properties` | with `cerbos`: `cerbos.roles`, `acr` | Claims sent as subject properties |
 | `management.server.port` | `9082` | Actuator, on `127.0.0.1` only |
 | `management.health.authzen.enabled` | `true` | The `authzen` health indicator, off by default in the starter |
 | `management.tracing.sampling.probability` | `1.0` | Every request is traced; Spring Boot's default is `0.1` |
 | `example.user-client-id` | `documents-cli` | The client the decision check gets user tokens from; the password comes from `EXAMPLE_USER_PASSWORD` |
+| `example.pdp-decides-new-documents` | `false`; `true` with `cerbos` | What the decision check expects of documents the realm does not know |
 
 ## Not shown
 
 - `resource.properties`: the starter infers the type and id of a resource, not its attributes, so
-  the realm's rule for updating the release notes (`status` must be `draft`) always denies here.
+  the rule for updating the release notes (`status` must be `draft`) always denies here, with
+  either PDP. Cerbos would need such attributes for policies on what a document is; see
+  [authzen-enforcer#124](https://github.com/authzenenforcer/authzen-enforcer/issues/124).
 - The client subject (`{"type": "client", "id": "document-portal"}`): the subject is always the
   caller of the request.
