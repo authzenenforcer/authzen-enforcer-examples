@@ -150,7 +150,7 @@ them with `"decision": false`, not with an error.
 
 AuthZEN support in Keycloak is experimental (`--features=authzen`, since 26.7). Dependabot proposes
 new Keycloak versions for `compose.yaml`, and CI runs the decision check and the examples against
-them. The behaviour below was checked with Keycloak 26.8.1 and affects how the examples are written:
+them. The behaviour below was checked with Keycloak 26.8.2 and affects how the examples are written:
 
 - **The endpoints are below `/realms/{realm}/authzen`.** Use metadata discovery, which finds them;
   the default paths of the specification do not apply.

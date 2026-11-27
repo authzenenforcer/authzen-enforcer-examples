@@ -63,6 +63,12 @@ load_env() {
             COMPOSE_PROFILE=""
             ;;
         cerbos)
+            case "${CERBOS_PORT:-3592}" in
+                '' | *[!0-9]*)
+                    echo "CERBOS_PORT must be a port number" >&2
+                    exit 2
+                    ;;
+            esac
             # The application profile cerbos; the realm still issues the tokens
             PDP_ARGS="--spring.profiles.active=cerbos --authzen.pdp.url=http://127.0.0.1:${CERBOS_PORT:-3592}"
             COMPOSE_PROFILE="--profile cerbos"
